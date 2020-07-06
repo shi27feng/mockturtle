@@ -32,8 +32,75 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
+
 namespace mockturtle
 {
+
+namespace detail
+{
+
+class thread_pool
+{
+public:
+  explicit thread_pool( uint64_t num_threads )
+    : num_threads( num_threads )
+  {
+    start();
+  }
+
+  ~thread_pool()
+  {
+    stop();
+  }
+
+private:
+  void start()
+  {
+    for ( auto i = 0ul; i < num_threads; ++i )
+    {
+      threads.emplace_back( [=]{
+          while ( true )
+          {
+            std::unique_lock<std::mutex> lock{stop_mutex};
+            stop_signal.wait( lock, [=]{ return stopping; } );
+
+            if ( stopping )
+            {
+              break;
+            }
+          }
+        } );
+    }
+  }
+
+  void stop() noexcept
+  {
+    {
+      std::unique_lock<std::mutex> lock{stop_mutex};
+      stopping = true;
+    }
+    stop_signal.notify_all();
+
+    for ( auto &thread : threads )
+    {
+      thread.join();
+    }
+  }
+
+private:
+  uint64_t num_threads;
+  std::vector<std::thread> threads;
+
+  std::condition_variable stop_signal;
+  std::mutex stop_mutex;
+  bool stopping = false;
+};
+
+} /* namespace detail */
 
 /*! \brief Parameters for multithreaded_cut_enumeration.
  *
@@ -45,6 +112,9 @@ struct multithreaded_cut_enumeration_params
 
   /*! \brief Maximum number of cuts for a node. */
   uint32_t cut_limit{16u};
+
+  /*! \brief Number of threads for cut enumeration. */
+  uint32_t num_threads{32u};
 
   /*! \brief Be verbose. */
   bool verbose{true};
@@ -68,6 +138,7 @@ public:
 
   void run()
   {
+    thread_pool threads{ps.num_threads};
     ntk.foreach_node( [this]( auto const node ) {
       const auto index = ntk.node_to_index( node );
 
