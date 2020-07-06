@@ -200,7 +200,7 @@ public:
 
     std::random_device rand;
     std::mt19937 gen( rand() ); /* seed random generator */
-    std::uniform_int_distribution<> distribution( 0, size ); /* define the range */
+    std::uniform_int_distribution<> distribution( 0, size - 1u ); /* define the range */
 
     while ( num_processed_nodes < size )
     {
