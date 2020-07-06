@@ -247,29 +247,41 @@ public:
              static_cast<uint32_t>( _storage->outputs.size() ) == _storage->data.num_pos );
   }
 
+#pragma region Structural properties
+  auto size() const
+  {
+    return static_cast<uint32_t>( _storage->nodes.size() );
+  }
+#pragma endregion
+
   bool is_constant( node const& n ) const
   {
+    assert( n < size() );
     return n == 0;
   }
 
   bool is_ci( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data;
   }
 
   bool is_pi( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && _storage->nodes[n].children[0].data < static_cast<uint64_t>(_storage->data.num_pis);
   }
 
   bool is_ro( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && _storage->nodes[n].children[0].data >= static_cast<uint64_t>(_storage->data.num_pis);
   }
 
   bool constant_value( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 #pragma endregion
@@ -439,6 +451,7 @@ public:
 #pragma region Restructuring
   std::optional<std::pair<node, signal>> replace_in_node( node const& n, node const& old_node, signal new_signal )
   {
+    assert( n < size() );
     auto& node = _storage->nodes[n];
 
     uint32_t fanin = 0u;
@@ -511,6 +524,8 @@ public:
 
   void replace_in_outputs( node const& old_node, signal const& new_signal )
   {
+    assert( old_node < size() );
+
     for ( auto& output : _storage->outputs )
     {
       if ( output.index == old_node )
@@ -526,6 +541,8 @@ public:
 
   void take_out_node( node const& n )
   {
+    assert( n < size() );
+
     /* we cannot delete CIs or constants */
     if ( n == 0 || is_ci( n ) )
       return;
@@ -554,11 +571,14 @@ public:
 
   inline bool is_dead( node const& n ) const
   {
+    assert( n < size() );
     return ( _storage->nodes[n].data[0].h1 >> 31 ) & 1;
   }
 
   void substitute_node( node const& old_node, signal const& new_signal )
   {
+    assert( old_node < size() );
+
     std::stack<std::pair<node, signal>> to_substitute;
     to_substitute.push( {old_node, new_signal} );
 
@@ -588,11 +608,6 @@ public:
 #pragma endregion
 
 #pragma region Structural properties
-  auto size() const
-  {
-    return static_cast<uint32_t>( _storage->nodes.size() );
-  }
-
   auto num_cis() const
   {
     return static_cast<uint32_t>( _storage->inputs.size() );
@@ -631,6 +646,8 @@ public:
 
   uint32_t fanin_size( node const& n ) const
   {
+    assert( n < size() );
+
     if ( is_constant( n ) || is_ci( n ) )
       return 0;
     return 2;
@@ -638,69 +655,81 @@ public:
 
   uint32_t fanout_size( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].data[0].h1 & UINT32_C( 0x7FFFFFFF );
   }
 
   uint32_t incr_fanout_size( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].data[0].h1++ & UINT32_C( 0x7FFFFFFF );
   }
 
   uint32_t decr_fanout_size( node const& n ) const
   {
+    assert( n < size() );
     return --_storage->nodes[n].data[0].h1 & UINT32_C( 0x7FFFFFFF );
   }
 
   bool is_and( node const& n ) const
   {
+    assert( n < size() );
     return n > 0 && !is_ci( n );
   }
 
   bool is_or( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_xor( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_maj( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_ite( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_xor3( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_nary_and( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_nary_or( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 
   bool is_nary_xor( node const& n ) const
   {
     (void)n;
+    assert( n < size() );
     return false;
   }
 #pragma endregion
@@ -709,6 +738,7 @@ public:
   kitty::dynamic_truth_table node_function( const node& n ) const
   {
     (void)n;
+    assert( n < size() );
     kitty::dynamic_truth_table _and( 2 );
     _and._bits[0] = 0x8;
     return _and;
@@ -723,6 +753,7 @@ public:
 
   signal make_signal( node const& n ) const
   {
+    assert( n < size() );
     return signal( n, 0 );
   }
 
@@ -733,6 +764,7 @@ public:
 
   uint32_t node_to_index( node const& n ) const
   {
+    assert( n < size() );
     return static_cast<uint32_t>( n );
   }
 
@@ -779,6 +811,7 @@ public:
 
   uint32_t ci_index( node const& n ) const
   {
+    assert( n < size() );
     assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data );
     return static_cast<uint32_t>( _storage->nodes[n].children[0].data );
   }
@@ -799,6 +832,7 @@ public:
 
   uint32_t pi_index( node const& n ) const
   {
+    assert( n < size() );
     assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data );
     assert( _storage->nodes[n].children[0].data < _storage->data.num_pis );
 
@@ -821,6 +855,7 @@ public:
 
   uint32_t ro_index( node const& n ) const
   {
+    assert( n < size() );
     assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data );
     assert( _storage->nodes[n].children[0].data >= _storage->data.num_pis );
 
@@ -955,6 +990,8 @@ public:
   template<typename Fn>
   void foreach_fanin( node const& n, Fn&& fn ) const
   {
+    assert( n < size() );
+
     if ( n == 0 || is_ci( n ) )
       return;
 
@@ -997,6 +1034,7 @@ public:
     (void)end;
 
     assert( n != 0 && !is_ci( n ) );
+    assert( n < size() );
 
     auto const& c1 = _storage->nodes[n].children[0];
     auto const& c2 = _storage->nodes[n].children[1];
@@ -1014,6 +1052,7 @@ public:
     (void)end;
 
     assert( n != 0 && !is_ci( n ) );
+    assert( n < size() );
 
     auto const& c1 = _storage->nodes[n].children[0];
     auto const& c2 = _storage->nodes[n].children[1];
@@ -1032,6 +1071,7 @@ public:
     /* TODO: assert type of *begin is partial_truth_table */
 
     assert( n != 0 && !is_ci( n ) );
+    assert( n < size() );
 
     auto const& c1 = _storage->nodes[n].children[0];
     auto const& c2 = _storage->nodes[n].children[1];
@@ -1057,21 +1097,25 @@ public:
 
   auto value( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].data[0].h2;
   }
 
   void set_value( node const& n, uint32_t v ) const
   {
+    assert( n < size() );
     _storage->nodes[n].data[0].h2 = v;
   }
 
   auto incr_value( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].data[0].h2++;
   }
 
   auto decr_value( node const& n ) const
   {
+    assert( n < size() );
     return --_storage->nodes[n].data[0].h2;
   }
 #pragma endregion
@@ -1084,11 +1128,13 @@ public:
 
   auto visited( node const& n ) const
   {
+    assert( n < size() );
     return _storage->nodes[n].data[1].h1;
   }
 
   void set_visited( node const& n, uint32_t v ) const
   {
+    assert( n < size() );
     _storage->nodes[n].data[1].h1 = v;
   }
 
