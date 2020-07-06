@@ -32,6 +32,8 @@
 
 #pragma once
 
+#include "../utils/stopwatch.hpp"
+
 #include <condition_variable>
 #include <future>
 #include <mutex>
@@ -156,6 +158,21 @@ struct multithreaded_cut_enumeration_params
   bool very_verbose{true};
 };
 
+/*! \brief Statistics for multithreaded_cut_enumeration.
+ *
+ */
+struct multithreaded_cut_enumeration_stats
+{
+  /*! \brief Total time. */
+  stopwatch<>::duration time_total{0};
+
+  /*! \brief Prints report. */
+  void report() const
+  {
+    std::cout << fmt::format( "[i] total time       = {:>5.2f} secs\n", to_seconds( time_total ) );
+  }
+};
+
 namespace detail
 {
 
@@ -163,14 +180,17 @@ template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
 public:
-  explicit multithreaded_cut_enumeration_impl( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps )
+  explicit multithreaded_cut_enumeration_impl( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
     , ps( ps )
+    , st( st )
   {
   }
 
   void run()
   {
+    stopwatch t( st.time_total );
+
     ntk.incr_trav_id();
     auto const trav_id = ntk.trav_id();
 
@@ -187,14 +207,19 @@ public:
       auto const index = distribution( gen );
 
       auto const node = ntk.index_to_node( index );
+
+      /* TODO: enumerate cuts for node */
+
+      /* ensure that each node is evaluated only once */
       if ( ntk.visited( node ) == trav_id )
         continue;
       ntk.set_visited( node, trav_id );
 
       threads.enqueue( [=]{
+          /* evaluate all cuts of the current node concurrently */
           if ( ps.very_verbose )
           {
-            std::cout << fmt::format( "[i] compute cut for node at index {} ({})\n", index, ntk.size() );
+            std::cout << fmt::format( "[i] evaluate cut for node at index {} ({})\n", index, ntk.size() );
           }
         } );
 
@@ -205,15 +230,25 @@ public:
 private:
   Ntk const& ntk;
   multithreaded_cut_enumeration_params const& ps;
+  multithreaded_cut_enumeration_stats& st;
 }; /* multithreaded_cut_enumeration_impl */
 
 } /* namespace detail */
 
 template<class Ntk>
-void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {} )
+void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {}, multithreaded_cut_enumeration_stats *pst = nullptr )
 {
-  detail::multithreaded_cut_enumeration_impl cut_enum( ntk, ps );
+  multithreaded_cut_enumeration_stats st;
+  detail::multithreaded_cut_enumeration_impl cut_enum( ntk, ps, st );
   cut_enum.run();
+  if ( ps.verbose )
+  {
+    st.report();
+  }
+  if ( pst )
+  {
+    *pst = st;
+  }
 }
 
 } /* namespace mockturtle */

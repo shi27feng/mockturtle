@@ -3,83 +3,143 @@
     "entries": [
       {
         "benchmark": "adder",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 1020,
+        "size_before": 1020
       },
       {
         "benchmark": "bar",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 3336,
+        "size_before": 3336
       },
       {
         "benchmark": "div",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 57247,
+        "size_before": 57247
       },
       {
         "benchmark": "hyp",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 214335,
+        "size_before": 214335
       },
       {
         "benchmark": "log2",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 32060,
+        "size_before": 32060
       },
       {
         "benchmark": "max",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 2865,
+        "size_before": 2865
       },
       {
         "benchmark": "multiplier",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 27062,
+        "size_before": 27062
       },
       {
         "benchmark": "sin",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 5416,
+        "size_before": 5416
       },
       {
         "benchmark": "sqrt",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 24618,
+        "size_before": 24618
       },
       {
         "benchmark": "square",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 18484,
+        "size_before": 18484
       },
       {
         "benchmark": "arbiter",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 11839,
+        "size_before": 11839
       },
       {
         "benchmark": "cavlc",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 693,
+        "size_before": 693
       },
       {
         "benchmark": "ctrl",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 174,
+        "size_before": 174
       },
       {
         "benchmark": "dec",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 304,
+        "size_before": 304
       },
       {
         "benchmark": "i2c",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 1342,
+        "size_before": 1342
       },
       {
         "benchmark": "int2float",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 260,
+        "size_before": 260
       },
       {
         "benchmark": "mem_ctrl",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 46836,
+        "size_before": 46836
       },
       {
         "benchmark": "priority",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 978,
+        "size_before": 978
       },
       {
         "benchmark": "router",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 257,
+        "size_before": 257
       },
       {
         "benchmark": "voter",
-        "equivalent": true
+        "equivalent": true,
+        "runtime": 0.0,
+        "size_after": 13758,
+        "size_before": 13758
       }
     ],
     "version": "1fa274d"

@@ -39,7 +39,7 @@ int main()
   using namespace experiments;
   using namespace mockturtle;
 
-  experiment<std::string, bool> exp( "multithreaded_rewriting", "benchmark", "equivalent" );
+  experiment<std::string, uint64_t, uint64_t, double, bool> exp( "multithreaded_rewriting", "benchmark", "size_before", "size_after", "runtime", "equivalent" );
   for ( auto const& benchmark : epfl_benchmarks() )
   {
     fmt::print( "[i] processing {}\n", benchmark );
@@ -51,11 +51,17 @@ int main()
       continue;
     }
 
-    multithreaded_cut_enumeration( aig );
+    uint64_t const size_before = aig.num_gates();
+
+    multithreaded_cut_enumeration_params ps;
+    multithreaded_cut_enumeration_stats st;
+    multithreaded_cut_enumeration( aig, ps, &st );
     aig = cleanup_dangling( aig );
 
+    uint64_t const size_after = aig.num_gates();
+
     auto const cec = abc_cec( aig, benchmark );
-    exp( benchmark, cec );
+    exp( benchmark, size_before, size_after, to_seconds( st.time_total ), cec );
   }
 
   exp.save();
