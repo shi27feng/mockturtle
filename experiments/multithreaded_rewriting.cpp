@@ -50,10 +50,14 @@ int main()
       fmt::print( "[e] could not parse benchmark {}\n", benchmark );
       continue;
     }
- 
+
+    multithreaded_cut_enumeration( aig );
     aig = cleanup_dangling( aig );
 
     auto const cec = abc_cec( aig, benchmark );
     exp( benchmark, cec );
   }
+
+  exp.save();
+  exp.table();
 }

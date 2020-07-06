@@ -1,0 +1,87 @@
+[
+  {
+    "entries": [
+      {
+        "benchmark": "adder",
+        "equivalent": true
+      },
+      {
+        "benchmark": "bar",
+        "equivalent": true
+      },
+      {
+        "benchmark": "div",
+        "equivalent": true
+      },
+      {
+        "benchmark": "hyp",
+        "equivalent": true
+      },
+      {
+        "benchmark": "log2",
+        "equivalent": true
+      },
+      {
+        "benchmark": "max",
+        "equivalent": true
+      },
+      {
+        "benchmark": "multiplier",
+        "equivalent": true
+      },
+      {
+        "benchmark": "sin",
+        "equivalent": true
+      },
+      {
+        "benchmark": "sqrt",
+        "equivalent": true
+      },
+      {
+        "benchmark": "square",
+        "equivalent": true
+      },
+      {
+        "benchmark": "arbiter",
+        "equivalent": true
+      },
+      {
+        "benchmark": "cavlc",
+        "equivalent": true
+      },
+      {
+        "benchmark": "ctrl",
+        "equivalent": true
+      },
+      {
+        "benchmark": "dec",
+        "equivalent": true
+      },
+      {
+        "benchmark": "i2c",
+        "equivalent": true
+      },
+      {
+        "benchmark": "int2float",
+        "equivalent": true
+      },
+      {
+        "benchmark": "mem_ctrl",
+        "equivalent": true
+      },
+      {
+        "benchmark": "priority",
+        "equivalent": true
+      },
+      {
+        "benchmark": "router",
+        "equivalent": true
+      },
+      {
+        "benchmark": "voter",
+        "equivalent": true
+      }
+    ],
+    "version": "1fa274d"
+  }
+]

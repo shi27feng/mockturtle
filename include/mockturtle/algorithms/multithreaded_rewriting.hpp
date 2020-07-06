@@ -35,6 +35,24 @@
 namespace mockturtle
 {
 
+/*! \brief Parameters for multithreaded_cut_enumeration.
+ *
+ */
+struct multithreaded_cut_enumeration_params
+{
+  /*! \brief Maximum number of leaves for a cut. */
+  uint32_t cut_size{6u};
+
+  /*! \brief Maximum number of cuts for a node. */
+  uint32_t cut_limit{16u};
+
+  /*! \brief Be verbose. */
+  bool verbose{true};
+
+  /*! \brief Be very verbose. */
+  bool very_verbose{true};
+};
+
 namespace detail
 {
 
@@ -42,25 +60,35 @@ template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
 public:
-  explicit multithreaded_cut_enumeration_impl( Ntk const& ntk )
+  explicit multithreaded_cut_enumeration_impl( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps )
     : ntk( ntk )
+    , ps( ps )
   {
   }
 
   void run()
   {
+    ntk.foreach_node( [this]( auto const node ) {
+      const auto index = ntk.node_to_index( node );
+
+      if ( ps.very_verbose )
+      {
+        std::cout << fmt::format( "[i] compute cut for node at index {}\n", index );
+      }
+      } );
   }
 
 private:
   Ntk const& ntk;
+  multithreaded_cut_enumeration_params const& ps;
 }; /* multithreaded_cut_enumeration_impl */
 
 } /* namespace detail */
 
 template<class Ntk>
-void multithreaded_cut_enumeration( Ntk const& ntk )
+void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {} )
 {
-  detail::multithreaded_cut_enumeration_impl cut_enum( ntk );
+  detail::multithreaded_cut_enumeration_impl cut_enum( ntk, ps );
   cut_enum.run();
 }
 
