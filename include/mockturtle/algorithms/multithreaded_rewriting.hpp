@@ -33,7 +33,8 @@
 #pragma once
 
 #include "../utils/stopwatch.hpp"
-
+#include "../views/depth_view.hpp"
+#include "../views/fanout_view.hpp"
 #include <condition_variable>
 #include <future>
 #include <mutex>
@@ -238,8 +239,11 @@ private:
 template<class Ntk>
 void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {}, multithreaded_cut_enumeration_stats *pst = nullptr )
 {
+  depth_view<Ntk> ntk2{ntk};
+  fanout_view<decltype( ntk2 )> ntk3{ntk2};
+
   multithreaded_cut_enumeration_stats st;
-  detail::multithreaded_cut_enumeration_impl cut_enum( ntk, ps, st );
+  detail::multithreaded_cut_enumeration_impl cut_enum( ntk3, ps, st );
   cut_enum.run();
   if ( ps.verbose )
   {
