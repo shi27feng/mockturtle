@@ -33,9 +33,12 @@
 #pragma once
 
 #include <condition_variable>
+#include <future>
 #include <mutex>
+#include <queue>
 #include <thread>
 #include <vector>
+#include <random>
 
 namespace mockturtle
 {
@@ -45,6 +48,9 @@ namespace detail
 
 class thread_pool
 {
+public:
+  using task_type = std::function<void()>;
+
 public:
   explicit thread_pool( uint64_t num_threads )
     : num_threads( num_threads )
@@ -57,6 +63,21 @@ public:
     stop();
   }
 
+  template<class T>
+  auto enqueue( T task ) -> std::future<decltype( task() )>
+  {
+    auto wrapper = std::make_shared<std::packaged_task<decltype( task() )()>>( std::move( task ) );
+    {
+      std::unique_lock<std::mutex> lock{event_mutex};
+      tasks.emplace( [=]{
+          (*wrapper)();
+        } );
+    }
+
+    event.notify_one();
+    return wrapper->get_future();
+  }
+
 private:
   void start()
   {
@@ -65,13 +86,24 @@ private:
       threads.emplace_back( [=]{
           while ( true )
           {
-            std::unique_lock<std::mutex> lock{stop_mutex};
-            stop_signal.wait( lock, [=]{ return stopping; } );
+            task_type task;
 
-            if ( stopping )
             {
-              break;
+              std::unique_lock<std::mutex> lock{event_mutex};
+              event.wait( lock, [=]{ return stopping || !tasks.empty(); } );
+
+              if ( stopping && tasks.empty() )
+              {
+                break;
+              }
+
+              /* take first task from the queue */
+              task = std::move( tasks.front() );
+              tasks.pop();
             }
+
+            /* execute task */
+            task();
           }
         } );
     }
@@ -80,10 +112,10 @@ private:
   void stop() noexcept
   {
     {
-      std::unique_lock<std::mutex> lock{stop_mutex};
+      std::unique_lock<std::mutex> lock{event_mutex};
       stopping = true;
     }
-    stop_signal.notify_all();
+    event.notify_all();
 
     for ( auto &thread : threads )
     {
@@ -94,9 +126,10 @@ private:
 private:
   uint64_t num_threads;
   std::vector<std::thread> threads;
+  std::queue<task_type> tasks;
 
-  std::condition_variable stop_signal;
-  std::mutex stop_mutex;
+  std::condition_variable event;
+  std::mutex event_mutex;
   bool stopping = false;
 };
 
@@ -138,15 +171,35 @@ public:
 
   void run()
   {
-    thread_pool threads{ps.num_threads};
-    ntk.foreach_node( [this]( auto const node ) {
-      const auto index = ntk.node_to_index( node );
+    ntk.incr_trav_id();
+    auto const trav_id = ntk.trav_id();
 
-      if ( ps.very_verbose )
-      {
-        std::cout << fmt::format( "[i] compute cut for node at index {}\n", index );
-      }
-      } );
+    thread_pool threads{ps.num_threads};
+    uint64_t const size = ntk.size();
+    uint64_t num_processed_nodes = 0u;
+
+    std::random_device rand;
+    std::mt19937 gen( rand() ); /* seed random generator */
+    std::uniform_int_distribution<> distribution( 0, size ); /* define the range */
+
+    while ( num_processed_nodes < size )
+    {
+      auto const index = distribution( gen );
+
+      auto const node = ntk.index_to_node( index );
+      if ( ntk.visited( node ) == trav_id )
+        continue;
+      ntk.set_visited( node, trav_id );
+
+      threads.enqueue( [=]{
+          if ( ps.very_verbose )
+          {
+            std::cout << fmt::format( "[i] compute cut for node at index {} ({})\n", index, ntk.size() );
+          }
+        } );
+
+      ++num_processed_nodes;
+    }
   }
 
 private:
