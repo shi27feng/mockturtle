@@ -181,6 +181,10 @@ template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
 public:
+  using node = node<Ntk>;
+  using signal = signal<Ntk>;
+
+public:
   explicit multithreaded_cut_enumeration_impl( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
     , ps( ps )
@@ -191,9 +195,6 @@ public:
   void run()
   {
     stopwatch t( st.time_total );
-
-    ntk.incr_trav_id();
-    auto const trav_id = ntk.trav_id();
 
     thread_pool threads{ps.num_threads};
     uint64_t const size = ntk.size();
@@ -206,26 +207,51 @@ public:
     while ( num_processed_nodes < size )
     {
       auto const index = distribution( gen );
-
-      auto const node = ntk.index_to_node( index );
-
-      /* TODO: enumerate cuts for node */
+      auto const pivot = ntk.index_to_node( index );
+      assert( pivot < ntk.size() );
 
       /* ensure that each node is evaluated only once */
-      if ( ntk.visited( node ) == trav_id )
+      if ( mark0( pivot ) )
+      {
         continue;
-      ntk.set_visited( node, trav_id );
+      }
+      set_mark0( pivot );
+
+      /* create window */
+      create_window( pivot );
 
       threads.enqueue( [=]{
           /* evaluate all cuts of the current node concurrently */
           if ( ps.very_verbose )
           {
-            std::cout << fmt::format( "[i] evaluate cut for node at index {} ({})\n", index, ntk.size() );
+            fmt::print( "[i] evaluate cut for node at index {} ({}/{})\n", index, num_processed_nodes, ntk.size() );
           }
         } );
 
       ++num_processed_nodes;
     }
+  }
+
+  void create_window( node const& pivot )
+  {
+    (void)pivot;
+
+
+  }
+
+  bool mark0( node const& n )
+  {
+    return ntk.value( n ) & 1;
+  }
+
+  void set_mark0( node const& n )
+  {
+    ntk.set_value( n, ntk.value( n ) | 1 );
+  }
+
+  void clear_mark0( node const& n )
+  {
+    ntk.set_value( n, ntk.value( n ) & 0 );
   }
 
 private:
