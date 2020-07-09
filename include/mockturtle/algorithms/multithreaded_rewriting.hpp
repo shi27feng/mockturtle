@@ -177,6 +177,186 @@ struct multithreaded_cut_enumeration_stats
 namespace detail
 {
 
+
+template<class Ntk>
+class window_manager
+{
+public:
+  static constexpr uint64_t const max_leaves = 6u;
+  static constexpr uint64_t const max_fanouts = 1000u;
+
+public:
+  using node = node<Ntk>;
+  using signal = signal<Ntk>;
+
+public:
+  explicit window_manager( Ntk const& ntk )
+    : ntk( ntk )
+    , levels( ntk.depth() + 1u )
+  {
+  }
+
+  void reconvergence_driven_cut( node const& pivot )
+  {
+    /* clean up */
+    leaves.clear();
+    nodes.clear();
+
+    nodes.emplace_back( pivot );
+    ntk.set_visited( pivot, ntk.trav_id() );
+
+    ntk.foreach_fanin( pivot, [&]( signal const& fi ){
+        node const& n = ntk.get_node( fi );
+        if ( n == 0 )
+          return;
+
+        leaves.emplace_back( n );
+        nodes.emplace_back( n );
+        ntk.set_visited( n, ntk.trav_id() );
+        return;
+      } );
+
+    if ( leaves.size() > max_leaves )
+    {
+      /* special case: cut already overflows at the current node bc the cut size limit is very low */
+      leaves.clear();
+    }
+    else
+    {
+      /* compute the cut */
+      while ( construct_cut() );
+      assert( leaves.size() <= max_leaves );
+    }
+  }
+
+  bool construct_cut()
+  {
+    uint64_t best_cost{std::numeric_limits<uint64_t>::max()};
+    std::optional<node> best_fanin;
+    uint64_t best_position;
+
+    uint64_t position = 0;
+    for ( const auto& l : leaves )
+    {
+      uint64_t const current_cost = cost( l );
+      if ( best_cost > current_cost ||
+           ( best_cost == current_cost && best_fanin && ntk.level( l ) > ntk.level( *best_fanin ) ) )
+      {
+        best_cost = current_cost;
+        best_fanin = std::make_optional( l );
+        best_position = position;
+      }
+
+      if ( best_cost == 0u )
+        break;
+
+      ++position;
+    }
+
+    if ( !best_fanin )
+    {
+      return false;
+    }
+
+    if ( leaves.size() - 1 + best_cost > max_leaves )
+    {
+      return false;
+    }
+
+    /* remove the best node from the array */
+    leaves.erase( std::begin( leaves ) + best_position );
+
+    /* add the fanins of best to leaves and nodes */
+    ntk.foreach_fanin( *best_fanin, [&]( signal const& fi ){
+        node const& n = ntk.get_node( fi );
+        if ( n != 0 && ( ntk.visited( n ) != ntk.trav_id() ) )
+        {
+          ntk.set_visited( n, ntk.trav_id() );
+          nodes.emplace_back( n );
+          leaves.emplace_back( n );
+        }
+      });
+
+    assert( leaves.size() <=  max_leaves );
+    return true;
+  }
+
+  uint64_t cost( node const &node )
+  {
+    /* make sure the node is in the construction zone */
+    assert( ntk.visited( node ) == ntk.trav_id() );
+
+    /* cannot expand over the CI node */
+    if ( ntk.is_constant( node ) || ntk.is_ci( node ) )
+    {
+      return std::numeric_limits<uint64_t>::max();
+    }
+
+    /* get the cost of the cone */
+    uint64_t cost = 0u;
+    ntk.foreach_fanin( node, [&]( const auto& fi ){
+        cost += ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() ) ? 0 : 1;
+      });
+
+    /* always accept if the number of leaves does not increase */
+    if ( cost < ntk.fanin_size( node ) )
+    {
+      return std::numeric_limits<uint64_t>::max();
+    }
+
+    /* skip nodes with many fanouts */
+    if ( ntk.fanout_size( node ) > max_fanouts )
+    {
+      return std::numeric_limits<uint64_t>::max();
+    }
+
+    /* return the number of nodes that will be on the leaves if this node is removed */
+    return cost;
+  }
+
+  std::vector<node> create_window( node const& pivot )
+  {
+    ntk.incr_trav_id();
+
+    reconvergence_driven_cut( pivot );
+
+    std::cout << "[i] leaves = ";
+    for ( const auto& l : leaves )
+    {
+      std::cout << l << ' ';
+    }
+    std::cout << std::endl;
+
+    std::cout << "[i] nodes = ";
+    for ( const auto& n : nodes )
+    {
+      std::cout << n << ' ';
+    }
+    std::cout << std::endl;
+
+
+    return nodes;
+  }
+
+
+private:
+  Ntk const& ntk;
+
+  /* levelized structure to temporarily store nodes */
+  std::vector<std::vector<node>> levels;
+
+  /* number of nodes stored in levels */
+  uint64_t num_nodes{0u};
+
+  std::vector<node> leaves;
+  std::vector<node> nodes;
+};
+
+} /* namespace detail */
+
+namespace detail
+{
+
 template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
@@ -204,6 +384,8 @@ public:
     std::mt19937 gen( rand() ); /* seed random generator */
     std::uniform_int_distribution<> distribution( 0, size - 1u ); /* define the range */
 
+    window_manager windows( ntk );
+
     while ( num_processed_nodes < size )
     {
       auto const index = distribution( gen );
@@ -218,7 +400,7 @@ public:
       set_mark0( pivot );
 
       /* create window */
-      create_window( pivot );
+      windows.create_window( pivot );
 
       threads.enqueue( [=]{
           /* evaluate all cuts of the current node concurrently */
