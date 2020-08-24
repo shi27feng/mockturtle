@@ -145,20 +145,14 @@ private:
  */
 struct multithreaded_cut_enumeration_params
 {
-  /*! \brief Maximum number of leaves for a cut. */
-  uint32_t cut_size{6u};
-
-  /*! \brief Maximum number of cuts for a node. */
-  uint32_t cut_limit{16u};
-
   /*! \brief Number of threads for cut enumeration. */
-  uint32_t num_threads{32u};
+  uint64_t num_threads{1u};
 
   /*! \brief Be verbose. */
   bool verbose{true};
 
   /*! \brief Be very verbose. */
-  bool very_verbose{true};
+  bool very_verbose{false};
 };
 
 /*! \brief Statistics for multithreaded_cut_enumeration.
@@ -169,29 +163,40 @@ struct multithreaded_cut_enumeration_stats
   /*! \brief Total time. */
   stopwatch<>::duration time_total{0};
 
-  stopwatch<>::duration time_reconv_cut{0};
-  stopwatch<>::duration time_filter_nodes{0};
-  stopwatch<>::duration time_try_grow_window{0};
-  stopwatch<>::duration time_grow_window{0};
+  stopwatch<>::duration time_create_window{0};
+  stopwatch<>::duration time_initialize_window{0};
+  stopwatch<>::duration time_window_inputs{0};
+  stopwatch<>::duration time_add_side_inputs{0};
+  stopwatch<>::duration time_explore{0};
+  stopwatch<>::duration time_expand_inputs{0};
+  stopwatch<>::duration time_grow{0};
+  stopwatch<>::duration time_try_adding_node{0};
 
+  uint64_t total_num_windows{0};
+  uint64_t total_num_candidates{0};
   uint64_t total_num_leaves{0};
   uint64_t total_num_nodes{0};
-  uint64_t total_num_candidates{0};
-  uint64_t total_num_windows{0};
 
   /*! \brief Prints report. */
   void report() const
   {
-    fmt::print( "[i] total time       = {:>5.2f} secs\n", to_seconds( time_total ) );
-    fmt::print( "[i] time reconv_cut      = {:>5.2f} secs\n", to_seconds( time_reconv_cut ) );
-    fmt::print( "[i] time filter_nodes    = {:>5.2f} secs\n", to_seconds( time_filter_nodes ) );
-    fmt::print( "[i] time try_grow_window = {:>5.2f} secs\n", to_seconds( time_try_grow_window ) );
-    fmt::print( "[i] time grow_window     = {:>5.2f} secs\n", to_seconds( time_grow_window ) );
+    fmt::print( "[i] total time                = {:>7.2f} secs\n", to_seconds( time_total ) );
+    fmt::print( "[i] time create_window        = {:>7.2f} secs\n", to_seconds( time_create_window ) );
+    fmt::print( "[i]   time initialize_window  = {:>7.2f} secs\n", to_seconds( time_initialize_window ) );
+    fmt::print( "[i]     time explore          = {:>7.2f} secs\n", to_seconds( time_explore ) );
+    fmt::print( "[i]   time window_inputs      = {:>7.2f} secs\n", to_seconds( time_window_inputs ) );
+    fmt::print( "[i]   time grow               = {:>7.2f} secs\n", to_seconds( time_grow ) );
+    fmt::print( "[i]     time add_side_inputs  = {:>7.2f} secs\n", to_seconds( time_add_side_inputs ) );
+    fmt::print( "[i]     time expand_inputs    = {:>7.2f} secs\n", to_seconds( time_expand_inputs ) );
 
-    fmt::print( "[i] average number of leaves = {:>5.2f}\n", double(total_num_leaves) / total_num_windows );
-    fmt::print( "[i] average number of nodes = {:>5.2f}\n", double(total_num_nodes) / total_num_windows );
-    fmt::print( "[i] average number of candidates = {:>5.2f}\n", double(total_num_candidates) / total_num_windows );
-    fmt::print( "[i] average number of windows = {}\n", total_num_windows );
+    fmt::print( "[i] number of leaves = {:>5d} (avg. leaves per window {:>5.2f})\n",
+                total_num_windows, double(total_num_leaves) / total_num_windows );
+    fmt::print( "[i] number of nodes = {:>5d} (avg. nodes per window {:>5.2f})\n",
+                total_num_nodes, double(total_num_nodes) / total_num_windows );
+    fmt::print( "[i] number of candidates = {:>5d}\n",
+                total_num_candidates );
+    fmt::print( "[i] number of windows = {:>5d} (avg. success rate {:>5.2f})\n",
+                total_num_windows, double(total_num_windows) / total_num_candidates );
   }
 };
 
@@ -202,376 +207,472 @@ template<class Ntk>
 class window_manager
 {
 public:
-  static constexpr uint64_t const max_leaves = 6u;
-  static constexpr uint64_t const max_fanouts = 1000u;
+  /*! \brief Maximum number of inputs. */
+  static constexpr uint64_t const max_inputs = 6u;
+
+  /*! \brief Maximum number of levels. */
+  static constexpr uint64_t const max_levels = 5u;
 
 public:
-  using node = node<Ntk>;
+  using node   = node<Ntk>;
   using signal = signal<Ntk>;
 
 public:
   explicit window_manager( Ntk const& ntk, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
     , st( st )
-    , levels( ntk.depth() + 1u )
   {
   }
 
-  void reconvergence_driven_cut( node const& pivot )
+  /* collect nodes on the path recursively from the meeting point to the root node, excluding the meeting point */
+  void gather( std::vector<node> const& paths, node const& n, std::vector<node>& visited )
   {
-    /* clean up */
-    leaves.clear();
-    nodes.clear();
+    if ( n == 0u )
+      return;
 
-    nodes.emplace_back( pivot );
-    ntk.set_visited( pivot, ntk.trav_id() );
+    visited.emplace_back( n );
+    auto const prev = paths[n];
+    if ( prev == 0 )
+      return;
 
-    ntk.foreach_fanin( pivot, [&]( signal const& fi ){
-        node const& n = ntk.get_node( fi );
-        if ( n == 0 )
-          return;
+    assert( ntk.visited( prev ) == ntk.visited( n ) );
+    gather( paths, prev, visited );
+  }
 
-        leaves.emplace_back( n );
-        nodes.emplace_back( n );
-        ntk.set_visited( n, ntk.trav_id() );
-        return;
-      } );
+  /* explore the frontier of nodes in breath-first traversal */
+  bool explore( std::vector<node>& visited, uint64_t start, std::vector<node>& paths, node& pi_meet, node& pi_node )
+  {
+    stopwatch t( st.time_explore );
 
-    if ( leaves.size() > max_leaves )
+    uint64_t const end = visited.size();
+    pi_meet = ntk.get_node( ntk.get_constant( false ) );
+    pi_node = ntk.get_node( ntk.get_constant( false ) );
+
+    bool result = false;
+    for ( uint64_t i = start; i < end; ++i )
     {
-      /* special case: cut already overflows at the current node bc the cut size limit is very low */
-      leaves.clear();
+      node const& n = visited.at( i );
+      if ( ntk.is_constant( n ) || ntk.is_ci( n ) )
+        continue;
+
+      ntk.foreach_fanin( n, [&]( signal const& fi ){
+          /* if the node was visited on the paths to both fanins, collect it */
+          if ( ntk.visited( n ) >= ntk.trav_id() - 1u &&
+               ntk.visited( ntk.get_node( fi ) ) >= ntk.trav_id() - 1u &&
+               ntk.visited( n ) != ntk.visited( ntk.get_node( fi ) ) )
+          {
+            pi_meet = ntk.get_node( fi );
+            pi_node = n;
+            result = true;
+            return false; /* terminate and return TRUE */
+          }
+
+          /* if the node was visited already on this path, skip it */
+          if ( ntk.visited( ntk.get_node( fi ) ) >= ntk.trav_id() - 1u )
+          {
+            assert( ntk.visited( n ) == ntk.visited( ntk.get_node( fi ) ) );
+            return true; /* next */
+          }
+
+          /* label the node as visited */
+          ntk.set_visited( ntk.get_node( fi ), ntk.visited( n ) );
+          paths[ntk.get_node( fi )] = n;
+          visited.emplace_back( ntk.get_node( fi ) );
+          return true; /* next */
+        });
+
+      if ( result )
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  std::optional<std::vector<node>> initialize_window( std::vector<node>& paths, node const& pivot, uint64_t num_iterations )
+  {
+    stopwatch t( st.time_initialize_window );
+
+    std::vector<node> visited( 100u );
+    assert( !ntk.is_constant( pivot ) && !ntk.is_ci( pivot ) );
+
+    uint64_t start{0};
+
+    /* start paths for both fanins of the pivot node */
+    ntk.foreach_fanin( pivot, [&]( signal const& fi ){
+        ntk.incr_trav_id();
+        visited.emplace_back( ntk.get_node( fi ) );
+        paths[ntk.get_node( fi )] = 0;
+        ntk.set_visited( ntk.get_node( fi ), ntk.trav_id() );
+      });
+
+    /* perform several iterations of breath-first search */
+    uint64_t i = 0u;
+    for ( ; i < num_iterations; ++i )
+    {
+      uint64_t next = visited.size();
+
+      node meet, n;
+      if ( explore( visited, start, paths, meet, n ) )
+      {
+        /* found the shared path */
+        // FIXME: skipping some error checks */
+
+        /* collect the initial window */
+        visited.clear();
+        gather( paths, paths[meet], visited );
+        gather( paths, n, visited );
+        visited.emplace_back( pivot );
+        break;
+      }
+
+      start = next;
+    }
+
+    /* if no meeting point is found, make sure to return NULL */
+    if ( i == num_iterations )
+    {
+      return std::nullopt;
     }
     else
     {
-      /* compute the cut */
-      while ( construct_cut() );
-      assert( leaves.size() <= max_leaves );
+      return visited;
     }
   }
 
-  bool construct_cut()
+  std::vector<node> create_window_inputs( std::vector<node>& window_nodes )
   {
-    uint64_t best_cost{std::numeric_limits<uint64_t>::max()};
-    std::optional<node> best_fanin;
-    uint64_t best_position;
+    stopwatch t( st.time_window_inputs );
 
-    uint64_t position = 0;
-    for ( const auto& l : leaves )
-    {
-      uint64_t const current_cost = cost( l );
-      if ( best_cost > current_cost ||
-           ( best_cost == current_cost && best_fanin && ntk.level( l ) > ntk.level( *best_fanin ) ) )
-      {
-        best_cost = current_cost;
-        best_fanin = std::make_optional( l );
-        best_position = position;
-      }
+    std::vector<node> inputs;
+    inputs.reserve( 10 );
 
-      if ( best_cost == 0u )
-        break;
-
-      ++position;
-    }
-
-    if ( !best_fanin )
-    {
-      return false;
-    }
-
-    if ( leaves.size() - 1 + best_cost > max_leaves )
-    {
-      return false;
-    }
-
-    /* remove the best node from the array */
-    leaves.erase( std::begin( leaves ) + best_position );
-
-    /* add the fanins of best to leaves and nodes */
-    ntk.foreach_fanin( *best_fanin, [&]( signal const& fi ){
-        node const& n = ntk.get_node( fi );
-        if ( n != 0 && ( ntk.visited( n ) != ntk.trav_id() ) )
-        {
-          ntk.set_visited( n, ntk.trav_id() );
-          nodes.emplace_back( n );
-          leaves.emplace_back( n );
-        }
-      });
-
-    assert( leaves.size() <=  max_leaves );
-    return true;
-  }
-
-  uint64_t cost( node const &node )
-  {
-    /* make sure the node is in the construction zone */
-    assert( ntk.visited( node ) == ntk.trav_id() );
-
-    /* cannot expand over the CI node */
-    if ( ntk.is_constant( node ) || ntk.is_ci( node ) )
-    {
-      return std::numeric_limits<uint64_t>::max();
-    }
-
-    /* get the cost of the cone */
-    uint64_t cost = 0u;
-    ntk.foreach_fanin( node, [&]( const auto& fi ){
-        cost += ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() ) ? 0 : 1;
-      });
-
-    /* always accept if the number of leaves does not increase */
-    if ( cost < ntk.fanin_size( node ) )
-    {
-      return std::numeric_limits<uint64_t>::max();
-    }
-
-    /* skip nodes with many fanouts */
-    if ( ntk.fanout_size( node ) > max_fanouts )
-    {
-      return std::numeric_limits<uint64_t>::max();
-    }
-
-    /* return the number of nodes that will be on the leaves if this node is removed */
-    return cost;
-  }
-
-  void filter_nodes( std::vector<node>& candidate_nodes )
-  {
-    for ( const auto& n : nodes )
-    {
-      /* skip nodes with many fanouts */
-      if ( ntk.fanout_size( n ) > 10u )
-      {
-        continue;
-      }
-
-      ntk.foreach_fanout( n, [&]( node const& fo ){
-          if ( ntk.visited( fo ) != ntk.trav_id() )
-          {
-            candidate_nodes.emplace_back( fo );
-          }
-        } );
-    }
-  }
-
-  std::vector<node> create_window( node const& pivot )
-  {
+    /* mark all window nodes as visited */
     ntk.incr_trav_id();
-
-    call_with_stopwatch( st.time_reconv_cut, [&]() {
-        reconvergence_driven_cut( pivot );
-    });
-
-    // std::cout << "[i] leaves = ";
-    // for ( const auto& l : leaves )
-    // {
-    //   std::cout << l << ' ';
-    // }
-    // std::cout << std::endl;
-
-    // std::cout << "[i] nodes = ";
-    // for ( const auto& n : nodes )
-    // {
-    //   std::cout << n << ' ';
-    // }
-    // std::cout << std::endl;
-
-    std::vector<node> candidate_nodes;
-    call_with_stopwatch( st.time_filter_nodes, [&]() {
-       filter_nodes( candidate_nodes );
-    });
-
-    // std::cout << "[i] candidate = ";
-    // for ( const auto& n : candidate_nodes )
-    // {
-    //   std::cout << n << ' ';
-    // }
-    // std::cout << std::endl;
-
-    /* update statistics */
-    st.total_num_leaves += leaves.size();
-    st.total_num_nodes += nodes.size();
-    st.total_num_candidates += candidate_nodes.size();
-    ++st.total_num_windows;
-
-#if 0
-    while ( true )
+    for ( auto const& n : window_nodes )
     {
-      if ( nodes.size() >= 20 )
-        break;
-
-      auto const node = grow_window( candidates );
-      if ( !node )
-      {
-        break;
-      }
-      try_grow_window( *node, true );
+      ntk.set_visited( n, ntk.trav_id() );
     }
-#endif
 
-    return nodes;
-  }
-
-  std::optional<node> grow_window( std::vector<node> const& candidate_nodes )
-  {
-    stopwatch t( st.time_grow_window );
-
-    std::optional<node> best_node;
-    std::optional<uint64_t> best_cost;
-    for ( const auto& n : candidate_nodes )
+    /* collet fanins of these nodes as inputs */
+    for ( auto const& n : window_nodes )
     {
-      auto const cost = try_grow_window( n );
-      if ( !best_cost || cost > *best_cost )
-      {
-        best_cost = cost;
-        best_node = n;
-      }
-    }
-    return best_node;
-  }
+      assert( !ntk.is_constant( n ) && !ntk.is_ci( n ) && "node is not a gate" );
 
-#if 0
-  std::optional<node> grow_window( std::vector<node>& leaves, std::vector<node>& nodes )
-  {
-    std::optional<node> best_node;
-    std::optional<uint64_t> best_cost;
-
-    /* iterate over nodes */
-    for( const auto& n : nodes )
-    {
-      /* foreach fanin */
       ntk.foreach_fanin( n, [&]( signal const& fi ){
-          auto const n = ntk.get_node( fi );
-          auto const cost = try_grow_window( n );
-          if ( !best_cost || cost > *best_cost )
+          node const& fanin_node = ntk.get_node( fi );
+          if ( ntk.visited( fanin_node ) == ntk.trav_id() )
           {
-            best_cost = cost;
-            best_node = n;
+            return true;
           }
-        } );
+
+          if ( std::find( std::begin( inputs ), std::end( inputs ), fanin_node ) == std::end( inputs ) )
+          {
+            inputs.emplace_back( fanin_node );
+          }
+          return true;
+        });
     }
 
-    /* return best node */
-    return best_node;
-  }
-#endif
+    /* mark inputs and add them to the window nodes */
+    for ( const auto& i : inputs )
+    {
+      ntk.set_visited( i, ntk.trav_id() );
+      window_nodes.emplace_back( i );
+    }
 
-  uint64_t try_grow_window( node const& pivot, bool collect_nodes = false )
+    return inputs;
+  }
+
+  bool create_window( node const& pivot, std::vector<std::vector<node>>& levels, std::vector<node>& paths, std::vector<node>& nodes, std::vector<node>& leaves )
   {
-    stopwatch t( st.time_try_grow_window );
+    stopwatch t( st.time_create_window );
+
+    std::optional<std::vector<node>> window_nodes = initialize_window( paths, pivot, max_levels );
+    if ( !window_nodes )
+    {
+      return false;
+    }
+
+    std::vector<node> window_leaves = create_window_inputs( *window_nodes );
+
+    /* consider window, which initially has a larger input space */
+    if ( window_leaves.size() <= max_inputs + 2 )
+    {
+      grow( levels, *window_nodes, window_leaves, max_inputs );
+    }
+
+    if ( window_leaves.size() <= max_inputs )
+    {
+      std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
+      std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
+      nodes = *window_nodes;
+      leaves = window_leaves;
+      return true;
+    }
+
+    return false;
+  }
+
+  void add_side_inputs( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes )
+  {
+    stopwatch t( st.time_add_side_inputs );
 
     /* ensure that levels is empty */
-    assert( num_nodes == 0u );
     assert( levels.size() > 0u );
 
-    /* add the pivot to the window and to the levelized structure */
-    assert( ntk.visited( pivot ) != ntk.trav_id() && "pivot must not be part of the window" );
-
-    ntk.set_visited( pivot, ntk.trav_id() );
-    levels[ntk.level( pivot )].emplace_back( pivot );
-    ++num_nodes;
-
-    /* iterate through all nodes in the levelized structure and explore their fanouts */
-    auto current_level = 0u;
-    for ( auto& level : levels )
+    /* window nodes are labeled with the current traversal id */
+    for ( node const& n : window_nodes )
     {
-      for ( auto& l : level )
+      assert( ntk.visited( n ) == ntk.trav_id() );
+      levels[ntk.level( n )].emplace_back( n );
+    }
+
+    /* iterate through all objects and explore their fanouts */
+    for ( std::vector<node>& level : levels )
+    {
+      for ( node const& n : level )
       {
-        /* do not explore object with many fanouts */
-        if ( ntk.fanout_size( l ) > 10u )
-        {
-          continue;
-        }
+        ntk.foreach_fanout( n, [&]( node const& fo, uint64_t index ){
+            /* explore first 5 fanouts of the node */
+            if ( index == 5u )
+              return false;
 
-        ntk.foreach_fanout( l, [&]( node const& fo ){
-            /* skip if fanout is not an internal node */
-            if ( !ntk.is_and( fo ) )
-            {
-              return;
-            }
+            /* ensure that fo is an internal node */
+            if ( ntk.is_constant( fo ) || ntk.is_ci( fo ) )
+              return true;
 
-            /* skip if fanout is already in the window */
+            /* ensure that fo is in the window */
             if ( ntk.visited( fo ) == ntk.trav_id() )
-            {
-              return;
-            }
+              return true;
 
-            /* skip if fanout has fanins which are not in the window */
-            bool at_least_one_fanin_is_not_part_of_window = false;
+            /* ensure that fanins are in the window */
+            bool fanins_are_in_the_window = true;
             ntk.foreach_fanin( fo, [&]( signal const& fi ){
                 if ( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() )
                 {
-                  at_least_one_fanin_is_not_part_of_window = true;
+                  fanins_are_in_the_window = false;
                   return false;
                 }
                 return true;
               });
-            if ( at_least_one_fanin_is_not_part_of_window )
-            {
-              return;
-            }
+            if ( !fanins_are_in_the_window )
+              return true;
 
             /* add fanout to the window and to the levelized structure */
             ntk.set_visited( fo, ntk.trav_id() );
             levels[ntk.level( fo )].emplace_back( fo );
-            assert( ntk.visited( fo ) == ntk.trav_id() );
-
-            if ( ntk.level( fo ) <= current_level )
-            {
-              /* modify previous level */
-              assert( false );
-            }
-            /* count the number of nodes in the structure */
-            ++num_nodes;
+            window_nodes.emplace_back( fo );
+            return true;
           });
       }
-      ++current_level;
     }
 
-    for ( const auto& level : levels )
-    {
-      for ( const auto& l : level )
-      {
-        if ( !collect_nodes )
-        {
-          ntk.set_visited( l, 0 ); /* unmark node */
-        }
-        else
-        {
-          assert( ntk.visited( l ) == ntk.trav_id() );
-          nodes.emplace_back( l );
-        }
-      }
-    }
-
-    /* clean the levelized structure */
-    cleanup();
-
-    assert( collect_nodes || ntk.visited( pivot ) != ntk.trav_id() );
-    return num_nodes;
-  }
-
-  void cleanup()
-  {
-    for ( auto& level : levels )
+    /* iterate through the nodes in the levelized structure */
+    for ( std::vector<node>& level : levels )
     {
       level.clear();
     }
-    num_nodes = 0;
+  }
+
+  void expand_inputs( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes, std::vector<node>& inputs )
+  {
+    stopwatch t( st.time_expand_inputs );
+
+    bool changed = true;
+    while ( changed )
+    {
+      changed = false;
+
+      auto it = std::begin( inputs );
+      while ( it != std::end( inputs ) )
+      {
+        node const input = *it;
+
+        /* skip all inputs that are not gates */
+        if ( ntk.is_constant( input ) || ntk.is_ci( input ) )
+        {
+          ++it;
+          continue; /* next */
+        }
+
+        /* skip if none of the fanins has been marked */
+        bool no_fanin_marked = true;
+        ntk.foreach_fanin( input, [&]( signal const& fi ){
+            if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
+            {
+              no_fanin_marked = false;
+              return false;
+            }
+            return true;
+          });
+        if ( no_fanin_marked )
+        {
+          ++it;
+          continue; /* next */
+        }
+
+        /* remove the current input from the vector */
+        it = inputs.erase( it );
+
+        /* ensure that the input is within the window nodes */
+        assert( std::find( std::begin( window_nodes ), std::end( window_nodes ), input ) != std::end( window_nodes ) );
+
+        ntk.foreach_fanin( input, [&]( signal const& fi ){
+            if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
+            {
+              return true; /* next */
+            }
+
+            assert( std::find( std::begin( inputs ), std::end( inputs ), ntk.get_node( fi ) ) == std::end( inputs ) );
+            inputs.emplace_back( ntk.get_node( fi ) );
+
+            try_adding_node( { ntk.get_node( fi ) }, levels, window_nodes );
+            assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
+            return true;
+          });
+
+        changed = true;
+      }
+    }
+  }
+
+  std::optional<node> select_one_input( std::vector<std::vector<node>>& levels, std::vector<node>& inputs )
+  {
+    std::optional<node> best_input{std::nullopt};
+    std::optional<uint64_t> best_weight{std::nullopt};
+
+    for ( node const& i : inputs )
+    {
+      if ( ntk.is_constant( i ) || ntk.is_ci( i ) )
+        continue;
+
+      std::vector<node> fis;
+      ntk.foreach_fanin( i, [&]( signal const& fi ){
+          assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
+          fis.emplace_back( ntk.get_node( fi ) );
+        });
+
+      std::vector<node> t;
+      uint64_t const weight = try_adding_node( fis, levels, t, false );
+      if ( !best_weight || *best_weight < weight )
+      {
+        best_weight = weight;
+        best_input = i;
+      }
+    }
+    return best_input;
+  }
+
+  void grow( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes, std::vector<node>& inputs, uint64_t max_inputs )
+  {
+    stopwatch t( st.time_grow );
+
+    add_side_inputs( levels, window_nodes );
+    expand_inputs( levels, window_nodes, inputs );
+
+    std::optional<node> n;
+    while ( inputs.size() < max_inputs && ( n = select_one_input( levels, inputs ) ) )
+    {
+      std::vector<node> fanin_nodes;
+      ntk.foreach_fanin( *n, [&]( signal const& fi ){
+          assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
+          fanin_nodes.emplace_back( ntk.get_node( fi ) );
+        });
+
+      try_adding_node( fanin_nodes, levels, window_nodes );
+      inputs.erase( std::remove( std::begin( inputs ), std::end( inputs ), *n ), std::end( inputs ) );
+
+      ntk.foreach_fanin( *n, [&]( signal const& fi ){
+          assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
+          inputs.emplace_back( ntk.get_node( fi ) );
+        });
+
+      expand_inputs( levels, window_nodes, inputs );
+    }
+  }
+
+  uint64_t try_adding_node( std::vector<node> const& pivots, std::vector<std::vector<node>>& levels, std::vector<node>& nodes, bool collect_nodes = true )
+  {
+    stopwatch t( st.time_try_adding_node );
+
+    /* ensure that levels is empty */
+    assert( levels.size() > 0u );
+
+    uint64_t count{0};
+
+    /* add the pivots to the window and to the levelized structure */
+    for ( node const& pivot : pivots )
+    {
+      assert( ntk.visited( pivot ) != ntk.trav_id() && "pivot must not be part of the window" );
+
+      ntk.set_visited( pivot, ntk.trav_id() );
+      levels[ntk.level( pivot )].emplace_back( pivot );
+    }
+
+    /* iterate through all objects and explore their fanouts */
+    for ( std::vector<node>& level : levels )
+    {
+      for ( node const& n : level )
+      {
+        ntk.foreach_fanout( n, [&]( node const& fo, uint64_t index ){
+            /* explore first 5 fanouts of the node */
+            if ( index == 5u )
+              return false;
+
+            /* ensure that fo is an internal node */
+            if ( ntk.is_constant( fo ) || ntk.is_ci( fo ) )
+              return true;
+
+            /* ensure that fo is in the window */
+            if ( ntk.visited( fo ) == ntk.trav_id() )
+              return true;
+
+            /* ensure that fanins are in the window */
+            bool fanins_are_in_the_window = true;
+            ntk.foreach_fanin( fo, [&]( signal const& fi ){
+                if ( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() )
+                {
+                  fanins_are_in_the_window = false;
+                  return false;
+                }
+                return true;
+              });
+            if ( !fanins_are_in_the_window )
+              return true;
+
+            /* add fanout to the window and to the levelized structure */
+            ntk.set_visited( fo, ntk.trav_id() );
+            levels[ntk.level( fo )].emplace_back( fo );
+            ++count;
+            return true;
+          });
+      }
+    }
+
+    /* iterate through the nodes in the levelized structure */
+    for ( std::vector<node>& level : levels )
+    {
+      for ( node& l : level )
+      {
+        if ( !collect_nodes ) /* it was a test run - unmark the node */
+        {
+          ntk.set_visited( l, ntk.visited( l ) - 1u ); /* unmark node */
+        }
+        else /* it was a real run - permanently add to the node to the window */
+        {
+          nodes.emplace_back( l );
+        }
+      }
+      level.clear();
+    }
+
+    return count;
   }
 
 private:
   Ntk const& ntk;
   multithreaded_cut_enumeration_stats& st;
-
-  /* levelized structure to temporarily store nodes */
-  std::vector<std::vector<node>> levels;
-
-  /* number of nodes stored in levels */
-  uint64_t num_nodes{0u};
-
-  std::vector<node> leaves;
-  std::vector<node> nodes;
 };
 
 } /* namespace detail */
@@ -594,10 +695,35 @@ public:
   {
   }
 
-  void run()
+  void enumerate_windows_test()
   {
-    stopwatch t( st.time_total );
+    uint32_t counter = 0u;
 
+    window_manager windows( ntk, st );
+
+    bool verbose = true;
+
+    std::vector<std::vector<node>> levels( ntk.depth() + 1u );
+    std::vector<node> paths( ntk.size() );
+
+    ntk.foreach_gate( [&]( node const& n, uint32_t index ){
+        std::vector<node> nodes;
+        std::vector<node> leaves;
+        bool result = windows.create_window( n, levels, paths, nodes, leaves );
+        if ( result )
+        {
+          ++st.total_num_windows;
+          st.total_num_nodes += nodes.size();
+          st.total_num_leaves += leaves.size();
+        }
+        ++st.total_num_candidates;
+        return true;
+      });
+  }
+
+  void multithreaded_test()
+  {
+#if 0
     thread_pool threads{ps.num_threads};
     uint64_t const size = ntk.size();
     uint64_t num_processed_nodes = 0u;
@@ -607,7 +733,6 @@ public:
     std::uniform_int_distribution<> distribution( 0, size - 1u ); /* define the range */
 
     window_manager windows( ntk, st );
-
     while ( num_processed_nodes < size )
     {
       auto const index = distribution( gen );
@@ -622,7 +747,19 @@ public:
       set_mark0( pivot );
 
       /* create window */
-      windows.create_window( pivot );
+      std::vector<std::vector<node>> levels( ntk.depth() + 1u );
+      std::vector<node> paths( ntk.size() );
+
+      std::vector<node> nodes;
+      std::vector<node> leaves;
+      if ( windows.create_window( pivot, levels, paths, nodes, leaves ) )
+      {
+        std::cout << "success" << std::endl;
+      }
+      else
+      {
+        // std::cout << "failed" << std::endl;
+      }
 
       threads.enqueue( [=]{
           /* evaluate all cuts of the current node concurrently */
@@ -634,6 +771,13 @@ public:
 
       ++num_processed_nodes;
     }
+#endif
+  }
+
+  void run()
+  {
+    stopwatch t( st.time_total );
+    enumerate_windows_test();
   }
 
   bool mark0( node const& n )
