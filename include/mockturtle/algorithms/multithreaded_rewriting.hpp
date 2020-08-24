@@ -163,6 +163,7 @@ struct multithreaded_cut_enumeration_stats
   /*! \brief Total time. */
   stopwatch<>::duration time_total{0};
 
+  /*! \brief Time for creating windows. */
   stopwatch<>::duration time_create_window{0};
   stopwatch<>::duration time_initialize_window{0};
   stopwatch<>::duration time_window_inputs{0};
@@ -172,9 +173,16 @@ struct multithreaded_cut_enumeration_stats
   stopwatch<>::duration time_grow{0};
   stopwatch<>::duration time_try_adding_node{0};
 
+  /*! \brief Total number of created windows. */
   uint64_t total_num_windows{0};
+
+  /*! \brief Total number of candidate windows. */
   uint64_t total_num_candidates{0};
+
+  /*! \brief Total number of leaves. */
   uint64_t total_num_leaves{0};
+
+  /*! \brief Total number of nodes. */
   uint64_t total_num_nodes{0};
 
   /*! \brief Prints report. */
@@ -221,11 +229,48 @@ public:
   explicit window_manager( Ntk const& ntk, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
     , st( st )
+    , levels( ntk.depth() + 1u )
+    , paths( ntk.size() )
   {
   }
 
+  bool create_window( node const& pivot, std::vector<node>& nodes, std::vector<node>& leaves )
+  {
+    stopwatch t( st.time_create_window );
+
+    std::optional<std::vector<node>> window_nodes = initialize_window( pivot );
+    if ( !window_nodes )
+    {
+      return false;
+    }
+
+    std::vector<node> window_leaves = create_window_inputs( *window_nodes );
+
+    /* consider window, which initially has a larger input space */
+    if ( window_leaves.size() <= max_inputs + 2 )
+    {
+      grow( *window_nodes, window_leaves );
+    }
+
+    if ( window_leaves.size() <= max_inputs )
+    {
+      std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
+      std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
+      nodes = *window_nodes;
+      leaves = window_leaves;
+      return true;
+    }
+    else
+    {
+      nodes.clear();
+      leaves.clear();
+    }
+    return false;
+  }
+
+private:
   /* collect nodes on the path recursively from the meeting point to the root node, excluding the meeting point */
-  void gather( std::vector<node> const& paths, node const& n, std::vector<node>& visited )
+  void gather( node const& n, std::vector<node>& visited )
   {
     if ( n == 0u )
       return;
@@ -236,11 +281,11 @@ public:
       return;
 
     assert( ntk.visited( prev ) == ntk.visited( n ) );
-    gather( paths, prev, visited );
+    gather( prev, visited );
   }
 
   /* explore the frontier of nodes in breath-first traversal */
-  bool explore( std::vector<node>& visited, uint64_t start, std::vector<node>& paths, node& pi_meet, node& pi_node )
+  bool explore( std::vector<node>& visited, uint64_t start, node& pi_meet, node& pi_node )
   {
     stopwatch t( st.time_explore );
 
@@ -289,7 +334,7 @@ public:
     return false;
   }
 
-  std::optional<std::vector<node>> initialize_window( std::vector<node>& paths, node const& pivot, uint64_t num_iterations )
+  std::optional<std::vector<node>> initialize_window( node const& pivot )
   {
     stopwatch t( st.time_initialize_window );
 
@@ -308,20 +353,20 @@ public:
 
     /* perform several iterations of breath-first search */
     uint64_t i = 0u;
-    for ( ; i < num_iterations; ++i )
+    for ( ; i < max_levels; ++i )
     {
       uint64_t next = visited.size();
 
       node meet, n;
-      if ( explore( visited, start, paths, meet, n ) )
+      if ( explore( visited, start, meet, n ) )
       {
         /* found the shared path */
         // FIXME: skipping some error checks */
 
         /* collect the initial window */
         visited.clear();
-        gather( paths, paths[meet], visited );
-        gather( paths, n, visited );
+        gather( paths[meet], visited );
+        gather( n, visited );
         visited.emplace_back( pivot );
         break;
       }
@@ -330,7 +375,7 @@ public:
     }
 
     /* if no meeting point is found, make sure to return NULL */
-    if ( i == num_iterations )
+    if ( i == max_levels )
     {
       return std::nullopt;
     }
@@ -384,37 +429,7 @@ public:
     return inputs;
   }
 
-  bool create_window( node const& pivot, std::vector<std::vector<node>>& levels, std::vector<node>& paths, std::vector<node>& nodes, std::vector<node>& leaves )
-  {
-    stopwatch t( st.time_create_window );
-
-    std::optional<std::vector<node>> window_nodes = initialize_window( paths, pivot, max_levels );
-    if ( !window_nodes )
-    {
-      return false;
-    }
-
-    std::vector<node> window_leaves = create_window_inputs( *window_nodes );
-
-    /* consider window, which initially has a larger input space */
-    if ( window_leaves.size() <= max_inputs + 2 )
-    {
-      grow( levels, *window_nodes, window_leaves, max_inputs );
-    }
-
-    if ( window_leaves.size() <= max_inputs )
-    {
-      std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
-      std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
-      nodes = *window_nodes;
-      leaves = window_leaves;
-      return true;
-    }
-
-    return false;
-  }
-
-  void add_side_inputs( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes )
+  void add_side_inputs( std::vector<node>& window_nodes )
   {
     stopwatch t( st.time_add_side_inputs );
 
@@ -475,7 +490,7 @@ public:
     }
   }
 
-  void expand_inputs( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes, std::vector<node>& inputs )
+  void expand_inputs( std::vector<node>& window_nodes, std::vector<node>& inputs )
   {
     stopwatch t( st.time_expand_inputs );
 
@@ -527,7 +542,7 @@ public:
             assert( std::find( std::begin( inputs ), std::end( inputs ), ntk.get_node( fi ) ) == std::end( inputs ) );
             inputs.emplace_back( ntk.get_node( fi ) );
 
-            try_adding_node( { ntk.get_node( fi ) }, levels, window_nodes );
+            try_adding_node( { ntk.get_node( fi ) }, window_nodes );
             assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
             return true;
           });
@@ -537,7 +552,7 @@ public:
     }
   }
 
-  std::optional<node> select_one_input( std::vector<std::vector<node>>& levels, std::vector<node>& inputs )
+  std::optional<node> select_one_input( std::vector<node>& inputs )
   {
     std::optional<node> best_input{std::nullopt};
     std::optional<uint64_t> best_weight{std::nullopt};
@@ -554,7 +569,7 @@ public:
         });
 
       std::vector<node> t;
-      uint64_t const weight = try_adding_node( fis, levels, t, false );
+      uint64_t const weight = try_adding_node( fis, t, false );
       if ( !best_weight || *best_weight < weight )
       {
         best_weight = weight;
@@ -564,15 +579,15 @@ public:
     return best_input;
   }
 
-  void grow( std::vector<std::vector<node>>& levels, std::vector<node>& window_nodes, std::vector<node>& inputs, uint64_t max_inputs )
+  void grow( std::vector<node>& window_nodes, std::vector<node>& inputs )
   {
     stopwatch t( st.time_grow );
 
-    add_side_inputs( levels, window_nodes );
-    expand_inputs( levels, window_nodes, inputs );
+    add_side_inputs( window_nodes );
+    expand_inputs( window_nodes, inputs );
 
     std::optional<node> n;
-    while ( inputs.size() < max_inputs && ( n = select_one_input( levels, inputs ) ) )
+    while ( inputs.size() < max_inputs && ( n = select_one_input( inputs ) ) )
     {
       std::vector<node> fanin_nodes;
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
@@ -580,7 +595,7 @@ public:
           fanin_nodes.emplace_back( ntk.get_node( fi ) );
         });
 
-      try_adding_node( fanin_nodes, levels, window_nodes );
+      try_adding_node( fanin_nodes, window_nodes );
       inputs.erase( std::remove( std::begin( inputs ), std::end( inputs ), *n ), std::end( inputs ) );
 
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
@@ -588,11 +603,11 @@ public:
           inputs.emplace_back( ntk.get_node( fi ) );
         });
 
-      expand_inputs( levels, window_nodes, inputs );
+      expand_inputs( window_nodes, inputs );
     }
   }
 
-  uint64_t try_adding_node( std::vector<node> const& pivots, std::vector<std::vector<node>>& levels, std::vector<node>& nodes, bool collect_nodes = true )
+  uint64_t try_adding_node( std::vector<node> const& pivots, std::vector<node>& nodes, bool collect_nodes = true )
   {
     stopwatch t( st.time_try_adding_node );
 
@@ -673,6 +688,9 @@ public:
 private:
   Ntk const& ntk;
   multithreaded_cut_enumeration_stats& st;
+
+  std::vector<std::vector<node>> levels;
+  std::vector<node> paths;
 };
 
 } /* namespace detail */
@@ -697,19 +715,12 @@ public:
 
   void enumerate_windows_test()
   {
-    uint32_t counter = 0u;
-
     window_manager windows( ntk, st );
 
-    bool verbose = true;
-
-    std::vector<std::vector<node>> levels( ntk.depth() + 1u );
-    std::vector<node> paths( ntk.size() );
-
-    ntk.foreach_gate( [&]( node const& n, uint32_t index ){
+    ntk.foreach_gate( [&]( node const& n ){
         std::vector<node> nodes;
         std::vector<node> leaves;
-        bool result = windows.create_window( n, levels, paths, nodes, leaves );
+        bool result = windows.create_window( n, nodes, leaves );
         if ( result )
         {
           ++st.total_num_windows;
