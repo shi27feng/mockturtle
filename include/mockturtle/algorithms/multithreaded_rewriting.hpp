@@ -35,6 +35,10 @@
 #include "../utils/stopwatch.hpp"
 #include "../views/depth_view.hpp"
 #include "../views/fanout_view.hpp"
+#include "simulation.hpp"
+
+#include <abcresub/abcresub.hpp>
+#include <kitty/kitty.hpp>
 
 #include <condition_variable>
 #include <future>
@@ -47,6 +51,132 @@
 
 namespace mockturtle
 {
+
+/*! \brief Implements an isolated view on a window in a network. */
+template<typename Ntk>
+class window_view : public immutable_view<Ntk>
+{
+public:
+  using storage = typename Ntk::storage;
+  using node = typename Ntk::node;
+  using signal = typename Ntk::signal;
+
+public:
+  explicit window_view( Ntk const& ntk, std::vector<node> const& leaves, std::vector<node> const& nodes )
+    : immutable_view<Ntk>( ntk )
+    , leaves( leaves )
+    , nodes( nodes )
+  {
+    /* all leaves are also stored in nodes */
+    assert( nodes.size() >= leaves.size() );
+
+    /* add constant node to nodes */
+    this->nodes.insert( std::begin( this->nodes ), 0u );
+
+    /* compute node_to_index */
+    uint32_t index = 0u;
+    for ( const auto& n : this->nodes )
+    {
+      node_to_index_map[n] = index++;
+    }
+
+    /* determine gates */
+    for ( const auto& n : this->nodes )
+    {
+      /* skip constant */
+      if ( n == 0u )
+        continue;
+
+      /* if the node is not a leave, then it's a gate */
+      if ( std::find( std::begin( leaves ), std::end( leaves ), n ) == std::end( leaves ) )
+      {
+        gates.emplace_back( n );
+      }
+    }
+
+    /* determine roots */
+    for ( const auto& n : this->nodes )
+    {
+      ntk.foreach_fanout( n, [&]( node const& fo ){
+          if ( std::find( std::begin( nodes ), std::end( nodes ), fo ) == std::end( nodes ) )
+          {
+            auto const s = ntk.make_signal( n );
+            if ( std::find( std::begin( roots ), std::end( roots ), s ) == std::end( roots ) )
+            {
+              roots.emplace_back( s );
+            }
+          }
+        });
+    }
+  }
+
+  inline auto size() const
+  {
+    return nodes.size();
+  }
+
+  inline auto num_pis() const
+  {
+    return leaves.size();
+  }
+
+  inline auto num_pos() const
+  {
+    return roots.size();
+  }
+
+  inline auto num_gates() const
+  {
+    return nodes.size() - leaves.size();
+  }
+
+  inline auto node_to_index( node const& n ) const
+  {
+    return node_to_index_map.at( n );
+  }
+
+  inline auto index_to_node( uint32_t index ) const
+  {
+    return nodes[index];
+  }
+
+  inline bool is_pi( node const& pi ) const
+  {
+    return std::find( std::begin( leaves ), std::end( leaves ), pi ) != std::end( leaves );
+  }
+
+  template<typename Fn>
+  void foreach_pi( Fn&& fn ) const
+  {
+    detail::foreach_element( std::begin( leaves ), std::end( leaves ), fn );
+  }
+
+  template<typename Fn>
+  void foreach_po( Fn&& fn ) const
+  {
+    detail::foreach_element( std::begin( roots ), std::end( roots ), fn );
+  }
+
+  template<typename Fn>
+  void foreach_node( Fn&& fn ) const
+  {
+    detail::foreach_element( std::begin( nodes ), std::end( nodes ), fn );
+  }
+
+  template<typename Fn>
+  void foreach_gate( Fn&& fn ) const
+  {
+    detail::foreach_element( std::begin( gates ), std::end( gates ), fn );
+  }
+
+protected:
+  std::vector<node> leaves;
+  std::vector<node> nodes;
+
+  std::vector<node> gates;
+  std::vector<signal> roots;
+  spp::sparse_hash_map<node, uint32_t> node_to_index_map;
+};
 
 namespace detail
 {
@@ -714,14 +844,76 @@ public:
     window_manager windows( ntk, st );
 
     ntk.foreach_gate( [&]( node const& n ){
-        auto const result = windows.create_window( n );
-        if ( result )
-        {
-          ++st.total_num_windows;
-          st.total_num_nodes += result->first.size();
-          st.total_num_leaves += result->second.size();
-        }
         ++st.total_num_candidates;
+
+        auto const result = windows.create_window( n );
+        if ( !result )
+        {
+          return true;
+        }
+
+        ++st.total_num_windows;
+        st.total_num_nodes += result->first.size();
+        st.total_num_leaves += result->second.size();
+
+        std::cout << "leaves = ";
+        for ( const auto& l : result->second )
+        {
+          std::cout << l << ' ';
+        }
+        std::cout << std::endl;
+
+        std::cout << "nodes = ";
+        for ( const auto& n : result->first )
+        {
+          std::cout << n << ' ';
+        }
+        std::cout << std::endl;
+
+        /* TOOD: ensure that the constant false is included in the window */
+        /* TODO: ensure that the nodes are topologically sorted */
+
+        /* make a view on the window */
+        window_view win( ntk, result->second, result->first );
+#if 0
+        std::cout << win.size() << std::endl;
+        std::cout << win.num_pis() << std::endl;
+        std::cout << win.num_pos() << std::endl;
+
+        std::cout<< "nodes: " << std::endl;
+        win.foreach_node( [&]( node const& n, uint32_t index ){
+            std::cout << index << ' ' << n << std::endl;
+          });
+
+        std::cout<< "pis: " << std::endl;
+        win.foreach_pi( [&]( node const& n, uint32_t index ){
+            std::cout << index << ' ' << n << std::endl;
+          });
+
+        std::cout<< "pos: " << std::endl;
+        win.foreach_po( [&]( signal const& s, uint32_t index ){
+            std::cout << index << ' ' << ( ntk.is_complemented( s ) ? '-' : '+' ) << ntk.get_node( s ) << std::endl;
+          });
+
+        std::cout<< "gates: " << std::endl;
+        win.foreach_gate( [&]( node const& n, uint32_t index ){
+            std::cout << index << ' ' << n << std::endl;
+          });
+#endif
+
+        /* simulate the window nodes */
+        default_simulator<kitty::dynamic_truth_table> sim( 6u );
+        auto tts = simulate_nodes<kitty::dynamic_truth_table>( win, sim );
+        win.foreach_node( [&]( node const& n, uint32_t index ){
+            fmt::print( "{:6}: {:6} {:64}\n", index, n, kitty::to_hex( tts[n] ) );
+          });
+
+        /* TODO: resubstitute the roots */
+
+        /* TODO: compute the gain */
+
+        /* TODO: rewrite the graph if gain is positive */
+
         return true;
       });
   }
