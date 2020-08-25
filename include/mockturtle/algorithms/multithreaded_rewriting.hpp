@@ -234,19 +234,19 @@ public:
   {
   }
 
-  bool create_window( node const& pivot, std::vector<node>& nodes, std::vector<node>& leaves )
+  std::optional<std::pair<std::vector<node>,std::vector<node>>> create_window( node const& pivot )
   {
     stopwatch t( st.time_create_window );
 
     std::optional<std::vector<node>> window_nodes = initialize_window( pivot );
     if ( !window_nodes )
     {
-      return false;
+      return std::nullopt;
     }
 
     std::vector<node> window_leaves = create_window_inputs( *window_nodes );
 
-    /* consider window, which initially has a larger input space */
+    /* consider a window, which initially has a larger input space */
     if ( window_leaves.size() <= max_inputs + 2 )
     {
       grow( *window_nodes, window_leaves );
@@ -256,16 +256,12 @@ public:
     {
       std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
       std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
-      nodes = *window_nodes;
-      leaves = window_leaves;
-      return true;
+      return std::make_pair( *window_nodes, window_leaves );
     }
     else
     {
-      nodes.clear();
-      leaves.clear();
+      return std::nullopt;
     }
-    return false;
   }
 
 private:
@@ -718,14 +714,12 @@ public:
     window_manager windows( ntk, st );
 
     ntk.foreach_gate( [&]( node const& n ){
-        std::vector<node> nodes;
-        std::vector<node> leaves;
-        bool result = windows.create_window( n, nodes, leaves );
+        auto const result = windows.create_window( n );
         if ( result )
         {
           ++st.total_num_windows;
-          st.total_num_nodes += nodes.size();
-          st.total_num_leaves += leaves.size();
+          st.total_num_nodes += result->first.size();
+          st.total_num_leaves += result->second.size();
         }
         ++st.total_num_candidates;
         return true;
