@@ -615,14 +615,58 @@ public:
 
     if ( window_leaves.size() <= max_inputs )
     {
-      std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
       std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
-      return std::make_pair( *window_nodes, window_leaves );
+
+      /* topologically sort the nodes */
+      auto const sorted_nodes = topo_sort( *window_nodes, window_leaves );
+      // std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
+      return std::make_pair( sorted_nodes, window_leaves );
     }
     else
     {
       return std::nullopt;
     }
+  }
+
+  std::vector<node> topo_sort( std::vector<node> const& nodes, std::vector<node> const& leaves )
+  {
+    std::vector<node> topo_order;
+    topo_order.reserve( nodes.size() );
+
+    ntk.incr_trav_id();
+    ntk.set_visited( ntk.get_node( ntk.get_constant( false ) ), ntk.trav_id() );
+    topo_order.emplace_back( ntk.get_node( ntk.get_constant( false ) ) );
+
+    for ( const auto& l : leaves )
+    {
+      ntk.set_visited( l, ntk.trav_id() );
+      topo_order.emplace_back( l );
+    }
+
+    for ( const auto& n : nodes )
+    {
+      topo_sort_recur( topo_order, n );
+    }
+    return topo_order;
+  }
+
+  void topo_sort_recur( std::vector<node>& topo_order, node const& n )
+  {
+    if ( ntk.visited( n ) == ntk.trav_id() )
+    {
+      return;
+    }
+
+    ntk.foreach_fanin( n, [&]( signal const& s ){
+        if ( ntk.visited( ntk.get_node( s ) ) != ntk.trav_id() )
+        {
+          topo_sort_recur( topo_order, ntk.get_node( s ) );
+        }
+      });
+
+    /* all have been visited */
+    ntk.set_visited( n, ntk.trav_id() );
+    topo_order.emplace_back( n );
   }
 
 private:
