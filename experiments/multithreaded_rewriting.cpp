@@ -45,7 +45,7 @@ int main()
          "create window time", "total runtime",
          "equivalent" );
 
-  for ( auto const& benchmark : epfl_benchmarks( ~experiments::hyp ) )
+  for ( auto const& benchmark : epfl_benchmarks() )
   {
     fmt::print( "[i] processing {}\n", benchmark );
 

@@ -107,18 +107,21 @@ public:
     return ( literals.size() >> 1 );
   }
 
+  void print_raw() const
+  {
+    assert( literals.size() % 2 == 0 );
+    auto const raw_array = raw_data();
+    std::cout << raw_array.second << std::endl;
+    for ( uint64_t i = 0; i < raw_array.second*2; ++i )
+    {
+      std::cout << raw_array.first[i] << ' ';
+    }
+    std::cout << std::endl;
+  }
+
   void print() const
   {
     assert( literals.size() % 2 == 0 );
-
-    // auto const raw_array = raw_data();
-    // std::cout << raw_array.second << std::endl;
-    // for ( uint64_t i = 0; i < raw_array.second*2; ++i )
-    // {
-    //   std::cout << raw_array.first[i] << ' ';
-    // }
-    // std::cout << std::endl;
-
     for ( auto i = 0u; i < literals.size(); i += 2 )
     {
       uint64_t const id  = i / 2;
@@ -320,6 +323,10 @@ public:
     }
     for ( const auto& n : nodes )
     {
+      if ( n == 0 )
+      {
+        continue;
+      }
       if ( int32_t( ntk.fanout_size( n ) ) != refs[n] )
       {
         roots.emplace_back( ntk.make_signal( n ) );
@@ -1211,7 +1218,7 @@ public:
           inputs.emplace_back( win.make_signal( n ) );
         });
 
-      /* the window has to be normalized, such that outputs are not complemented */
+      /* collect outputs and ensure that they are regular */
       std::vector<node> outputs;
       win.foreach_po( [&]( signal const& s ){
           if ( win.is_complemented( s ) )
@@ -1228,9 +1235,18 @@ public:
       uint64_t counter = 0;
       insert( ntk, std::begin( inputs ), std::end( inputs ), new_indices,
               [&]( signal const& s ){
+                auto const output = outputs.at( counter++ );
+
+                /* only substitute if the output is different */
+                if ( output == ntk.get_node( s ) && !ntk.is_complemented( s ) )
+                {
+                  return true;
+                }
+
                 fmt::print( "substitute node {} with signal {}{}\n",
-                            outputs.at( counter ), ntk.is_complemented( s ) ? "~" : "", ntk.get_node( s ) );
-                ntk.substitute_node( outputs.at( counter++ ), s );
+                            output, ntk.is_complemented( s ) ? "~" : "", ntk.get_node( s ) );
+                ntk.substitute_node( output, s );
+                return true;
               });
 
       return false;
