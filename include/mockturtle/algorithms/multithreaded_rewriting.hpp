@@ -166,6 +166,112 @@ private:
 }; /* index_list */
 
 /* \brief Generates a list of indices from a network type */
+template<typename Ntk>
+void encode( index_list& indices, Ntk const& ntk )
+{
+  using node   = typename Ntk::node;
+  using signal = typename Ntk::signal;
+
+  /* constant */
+  // if ( ntk.has_constant() )
+  // {
+  indices.push2( 0 );
+  // }
+
+  /* inputs */
+  for ( uint64_t i = 0; i < ntk.num_pis(); ++i )
+  {
+    indices.push2( 0 );
+  }
+
+  /* gates */
+  ntk.foreach_gate( [&]( node const& n ){
+      std::vector<signal> fanins;
+      ntk.foreach_fanin( n, [&]( signal const& fi ){
+          fanins.emplace_back( fi );
+        });
+
+      uint64_t lit0 = 2*ntk.node_to_index( ntk.get_node( fanins[0] ) ) + ntk.is_complemented( fanins[0] );
+      uint64_t lit1 = 2*ntk.node_to_index( ntk.get_node( fanins[1] ) ) + ntk.is_complemented( fanins[1] );
+      if ( ( ntk.is_and( n ) && ( lit0 > lit1 ) ) ||
+           ( ntk.is_xor( n ) && ( lit0 < lit1 ) ) )
+      {
+        std::swap( lit0, lit1 );
+      }
+      indices.push2( lit0, lit1 );
+    });
+
+  /* outputs */
+  ntk.foreach_po( [&]( signal const& f ){
+      indices.push2( 2*ntk.node_to_index( ntk.get_node( f ) ) + ntk.is_complemented( f ) );
+    });
+
+  assert( index_list.size() == 2*( ntk.has_constant() + ntk.num_pis() + ntk.num_gates() + ntk.num_pos() ) );
+}
+
+/* \brief Generates a network from a list of indices */
+template<typename Ntk>
+void decode( Ntk& ntk, index_list const& indices )
+{
+  using signal = typename Ntk::signal;
+
+  std::vector<signal> signals;
+  for ( uint64_t i = 0; i < indices.num_pis(); ++i )
+  {
+    signals.emplace_back( ntk.create_pi() );
+  }
+
+  insert( ntk, std::begin( signals ), std::end( signals ), indices,
+          [&]( signal const& s ){ ntk.create_po( s ); });
+}
+
+/* \brief Inserts a list of indices into an existing network */
+template<typename Ntk, typename BeginIter, typename EndIter, typename Fn>
+void insert( Ntk& ntk, BeginIter begin, EndIter end, index_list const& indices, Fn&& fn )
+{
+  using node   = typename Ntk::node;
+  using signal = typename Ntk::signal;
+
+  std::vector<signal> signals;
+  signals.emplace_back( ntk.get_constant( false ) );
+  for ( auto it = begin; it != end; ++it )
+  {
+    signals.emplace_back( *it );
+  }
+
+  indices.foreach_entry( [&]( uint64_t lit0, uint64_t lit1 ){
+      /* skip constant and inputs */
+      if ( lit0 == 0 && lit1 == 0 )
+      {
+        return;
+      }
+
+      uint64_t const i0 = lit0 >> 1;
+      uint64_t const i1 = lit1 >> 1;
+      bool const c0 = lit0 % 2;
+      bool const c1 = lit1 % 2;
+
+      signal const s0 = c0 ? !signals.at( i0 ) : signals.at( i0 );
+      signal const s1 = c1 ? !signals.at( i1 ) : signals.at( i1 );
+
+      /* outputs */
+      if ( lit0 == lit1 )
+      {
+        fn( s0 );
+      }
+      /* AND gates */
+      else if ( i0 < i1 )
+      {
+        signals.emplace_back( ntk.create_and( s0, s1 ) );
+      }
+      /* XOR gates */
+      else
+      {
+        signals.emplace_back( ntk.create_xor( s0, s1 ) );
+      }
+    });
+}
+
 /*! \brief Implements an isolated view on a window in a network. */
 template<typename Ntk>
 class window_view : public immutable_view<Ntk>
