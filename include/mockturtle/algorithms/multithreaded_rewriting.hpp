@@ -855,7 +855,9 @@ private:
     for ( node const& n : window_nodes )
     {
       assert( ntk.visited( n ) == ntk.trav_id() );
-      levels[ntk.level( n )].emplace_back( n );
+      assert( ntk.level( n ) >= 0 );
+      assert( ntk.level( n ) < levels.size() );
+      levels[ntk.level( n )].push_back( n );
     }
 
     /* iterate through all objects and explore their fanouts */
@@ -1346,6 +1348,10 @@ public:
     if ( curr_level != max_level )
     {
       ntk.set_level( n, max_level );
+      if ( max_level > ntk.depth() )
+      {
+        ntk.set_depth( max_level );
+      }
 
       /* update only one more level */
       if ( top_most )
