@@ -1179,11 +1179,11 @@ public:
       /* convert to mini AIG */
       aig_network window_aig;
       decode( window_aig, indices );
-      write_verilog( window_aig, std::cout );
+      write_verilog( window_aig, "win.v" );
 
       /* optimize index list using the resubstitution algorithm */
       auto const raw_array = indices.raw_data();
-      
+
       abcresub::Abc_ResubPrepareManager( 1 );
       int num_resubs;
       int *new_indices_raw;
@@ -1196,19 +1196,19 @@ public:
       }
 
       index_list new_indices( new_indices_raw, 2*new_entries );
-      new_indices.print();
 
       /* convert to mini AIG */
       aig_network window_aig_new;
       decode( window_aig_new, new_indices );
-      write_verilog( window_aig_new, std::cout );
+      write_verilog( window_aig_new, "win_opt.v" );
 
       /* TODO: verify that windows are equivalent */
+      system( "abc -c \"cec -n win.v win_opt.v\"" );
 
       /* substitute optimized window into the large network */
       std::vector<signal> inputs;
       win.foreach_pi( [&]( node const& n ){
-          inputs.emplace_back( n );
+          inputs.emplace_back( win.make_signal( n ) );
         });
 
       /* the window has to be normalized, such that outputs are not complemented */
@@ -1221,13 +1221,15 @@ public:
           }
           else
           {
-            outputs.emplace_back( ntk.get_node( s ) );
+            outputs.emplace_back( win.get_node( s ) );
           }
         });
 
       uint64_t counter = 0;
-      insert( ntk, std::begin( inputs ), std::end( inputs ), indices,
+      insert( ntk, std::begin( inputs ), std::end( inputs ), new_indices,
               [&]( signal const& s ){
+                fmt::print( "substitute node {} with signal {}{}\n",
+                            outputs.at( counter ), ntk.is_complemented( s ) ? "~" : "", ntk.get_node( s ) );
                 ntk.substitute_node( outputs.at( counter++ ), s );
               });
 
