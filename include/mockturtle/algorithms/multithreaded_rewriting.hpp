@@ -290,8 +290,11 @@ public:
     /* all leaves are also stored in nodes */
     assert( nodes.size() >= leaves.size() );
 
-    /* add constant node to nodes */
-    this->nodes.insert( std::begin( this->nodes ), 0u );
+    /* add constant node to nodes if necessary */
+    if ( this->nodes.begin() != this->nodes.end() && *this->nodes.begin() != 0u )
+    {
+      this->nodes.insert( std::begin( this->nodes ), 0u );
+    }
 
     /* compute node_to_index */
     uint32_t index = 0u;
@@ -300,33 +303,41 @@ public:
       node_to_index_map[n] = index++;
     }
 
-    /* determine gates */
-    for ( const auto& n : this->nodes )
+    std::vector<int32_t> refs( ntk.size() );
+    for ( const auto& n : nodes )
     {
-      /* skip constant */
-      if ( n == 0u )
-        continue;
-
-      /* if the node is not a leave, then it's a gate */
-      if ( std::find( std::begin( leaves ), std::end( leaves ), n ) == std::end( leaves ) )
+      if ( ntk.is_and( n ) )
       {
-        gates.emplace_back( n );
+        ntk.foreach_fanin( n, [&]( signal const& fi ){
+            refs[ntk.get_node( fi )] += 1;
+          });
       }
     }
-
-    /* determine roots */
-    for ( const auto& n : this->nodes )
+    for ( const auto& l : leaves )
     {
-      ntk.foreach_fanout( n, [&]( node const& fo ){
-          if ( std::find( std::begin( nodes ), std::end( nodes ), fo ) == std::end( nodes ) )
-          {
-            auto const s = ntk.make_signal( n );
-            if ( std::find( std::begin( roots ), std::end( roots ), s ) == std::end( roots ) )
-            {
-              roots.emplace_back( s );
-            }
-          }
-        });
+      refs[l] = ntk.fanout_size( l );
+    }
+    for ( const auto& n : nodes )
+    {
+      if ( int32_t( ntk.fanout_size( n ) ) != refs[n] )
+      {
+        roots.emplace_back( ntk.make_signal( n ) );
+      }
+    }
+    for ( const auto& n : nodes )
+    {
+      if ( ntk.is_and( n ) )
+      {
+        ntk.foreach_fanin( n, [&]( signal const& fi ){
+            refs[ntk.get_node( fi )] += -1;
+          });
+
+        /* if the node is not a leave, then it's a gate */
+        if ( std::find( std::begin( leaves ), std::end( leaves ), n ) == std::end( leaves ) )
+        {
+          gates.push_back( n );
+        }
+      }
     }
   }
 
@@ -347,7 +358,7 @@ public:
 
   inline auto num_gates() const
   {
-    return nodes.size() - leaves.size();
+    return nodes.size() - leaves.size() - 1u;
   }
 
   inline auto node_to_index( node const& n ) const
