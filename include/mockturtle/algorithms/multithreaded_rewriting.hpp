@@ -52,6 +52,120 @@
 namespace mockturtle
 {
 
+class index_list
+{
+public:
+  using element_type = uint32_t;
+
+public:
+  explicit index_list() {}
+
+  explicit index_list( int* lits, uint64_t num_lits )
+    : literals( lits, lits + num_lits )
+  {
+    assert( num_lits % 2 == 0 );
+
+    /* count the number of zero entries at the beginning of the list */
+    for ( uint64_t i = 0; i < literals.size(); i+=2 )
+    {
+      if ( literals.at( i ) != 0 || literals.at( i + 1 ) != 0 )
+        return;
+
+      ++num_zero_entries;
+    }
+  }
+
+  std::pair<int*, uint64_t> raw_data() const
+  {
+    return std::make_pair<int*, uint64_t>( (int*)&literals[0], literals.size() / 2 );
+  }
+
+  void push2( element_type lit )
+  {
+    if ( lit == 0 )
+    {
+      ++num_zero_entries;
+    }
+    literals.emplace_back( lit );
+    literals.emplace_back( lit );
+  }
+
+  void push2( element_type lit0, element_type lit1 )
+  {
+    if ( lit0 == 0 && lit1 == 0 )
+    {
+      ++num_zero_entries;
+    }
+    literals.emplace_back( lit0 );
+    literals.emplace_back( lit1 );
+  }
+
+  uint64_t num_entries() const
+  {
+    return ( literals.size() >> 1 );
+  }
+
+  void print() const
+  {
+    assert( literals.size() % 2 == 0 );
+
+    auto const raw_array = raw_data();
+    std::cout << raw_array.second << std::endl;
+    for ( uint64_t i = 0; i < raw_array.second*2; ++i )
+    {
+      std::cout << raw_array.first[i] << ' ';
+    }
+    std::cout << std::endl;
+
+    for ( auto i = 0u; i < literals.size(); i += 2 )
+    {
+      uint64_t const id  = i / 2;
+      uint64_t const lit0 = literals.at( i );
+      uint64_t const lit1 = literals.at( i+1 );
+
+      /* constant or pi */
+      if ( lit0 == 0 && lit1 == 0  )
+      {
+        fmt::print( "Obj {:4d} : {}\n", id, id == 0 ? "constant" : "PI" );
+      }
+      else if ( lit0 == lit1 )
+      {
+        fmt::print( "Obj {:4d} : PO( {:4d} )\n", id, lit0 );
+      }
+      /* AND gate */
+      else if ( lit0 < lit1 )
+      {
+        fmt::print( "Obj {:4d} : AND( {:4d}, {:4d} )\n", id, lit0, lit1 );
+      }
+      else
+      {
+        fmt::print( "Obj {:4d} : XOR( {:4d}, {:4d} )\n", id, lit0, lit1 );
+      }
+    }
+  }
+
+  template<typename Fn>
+  void foreach_entry( Fn&& fn ) const
+  {
+    assert( literals.size() % 2 == 0 );
+    for ( auto i = 0u; i < literals.size(); i += 2 )
+    {
+      fn( literals.at( i ), literals.at( i+1 ) );
+    }
+  }
+
+  uint64_t num_pis() const
+  {
+    /* the first entry is reserved for the constant */
+    return ( num_zero_entries - 1 );
+  }
+
+private:
+  std::vector<element_type> literals;
+  uint64_t num_zero_entries{0};
+}; /* index_list */
+
+/* \brief Generates a list of indices from a network type */
 /*! \brief Implements an isolated view on a window in a network. */
 template<typename Ntk>
 class window_view : public immutable_view<Ntk>
