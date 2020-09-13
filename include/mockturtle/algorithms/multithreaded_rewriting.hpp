@@ -211,7 +211,7 @@ void encode( index_list& indices, Ntk const& ntk )
       indices.push2( 2*ntk.node_to_index( ntk.get_node( f ) ) + ntk.is_complemented( f ) );
     });
 
-  assert( index_list.size() == 2*( ntk.has_constant() + ntk.num_pis() + ntk.num_gates() + ntk.num_pos() ) );
+  assert( indices.num_entries() == /* ntk.has_constant() */ 1u + ntk.num_pis() + ntk.num_gates() + ntk.num_pos() );
 }
 
 /* \brief Generates a network from a list of indices */
