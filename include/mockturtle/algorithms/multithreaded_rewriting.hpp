@@ -35,9 +35,11 @@
 #include "../utils/stopwatch.hpp"
 #include "../views/depth_view.hpp"
 #include "../views/fanout_view.hpp"
+#include "../io/write_verilog.hpp"
 #include "simulation.hpp"
 
-#include <abcresub/abcresub.hpp>
+#include "../utils/abc_resub.hpp"
+
 #include <kitty/kitty.hpp>
 
 #include <condition_variable>
@@ -109,13 +111,13 @@ public:
   {
     assert( literals.size() % 2 == 0 );
 
-    auto const raw_array = raw_data();
-    std::cout << raw_array.second << std::endl;
-    for ( uint64_t i = 0; i < raw_array.second*2; ++i )
-    {
-      std::cout << raw_array.first[i] << ' ';
-    }
-    std::cout << std::endl;
+    // auto const raw_array = raw_data();
+    // std::cout << raw_array.second << std::endl;
+    // for ( uint64_t i = 0; i < raw_array.second*2; ++i )
+    // {
+    //   std::cout << raw_array.first[i] << ' ';
+    // }
+    // std::cout << std::endl;
 
     for ( auto i = 0u; i < literals.size(); i += 2 )
     {
@@ -229,7 +231,6 @@ void decode( Ntk& ntk, index_list const& indices )
 template<typename Ntk, typename BeginIter, typename EndIter, typename Fn>
 void insert( Ntk& ntk, BeginIter begin, EndIter end, index_list const& indices, Fn&& fn )
 {
-  using node   = typename Ntk::node;
   using signal = typename Ntk::signal;
 
   std::vector<signal> signals;
@@ -546,6 +547,9 @@ struct multithreaded_cut_enumeration_stats
   /*! \brief Total number of nodes. */
   uint64_t total_num_nodes{0};
 
+  uint64_t count_success_resub{0};
+  uint64_t count_failed_resub{0};
+
   /*! \brief Prints report. */
   void report() const
   {
@@ -557,6 +561,9 @@ struct multithreaded_cut_enumeration_stats
     fmt::print( "[i]   time grow               = {:>7.2f} secs\n", to_seconds( time_grow ) );
     fmt::print( "[i]     time add_side_inputs  = {:>7.2f} secs\n", to_seconds( time_add_side_inputs ) );
     fmt::print( "[i]     time expand_inputs    = {:>7.2f} secs\n", to_seconds( time_expand_inputs ) );
+
+    fmt::print( "[i] successful resubs  = {:>5d}\n", count_success_resub );
+    fmt::print( "[i] failed resubs      = {:>5d}\n", count_failed_resub );
 
     fmt::print( "[i] number of leaves = {:>5d} (avg. leaves per window {:>5.2f})\n",
                 total_num_windows, double(total_num_leaves) / total_num_windows );
@@ -1107,90 +1114,125 @@ public:
   using signal = signal<Ntk>;
 
 public:
-  explicit multithreaded_cut_enumeration_impl( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps, multithreaded_cut_enumeration_stats& st )
+  explicit multithreaded_cut_enumeration_impl( Ntk& ntk, multithreaded_cut_enumeration_params const& ps, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
     , ps( ps )
     , st( st )
   {
+    /* prepare ABC's resubstitution engine (for 6-input functions) */
+    // abcresub::Abc_ResubPrepareManager( /* num_blocks = */ 1 );
+
+    auto const update_level_of_new_node = [&]( const auto& n ) {
+      ntk.resize_levels();
+      update_node_level( n );
+    };
+
+    auto const update_level_of_existing_node = [&]( node const& n, const auto& old_children ) {
+      (void)old_children;
+      ntk.resize_levels();
+      update_node_level( n );
+    };
+
+    auto const update_level_of_deleted_node = [&]( const auto& n ) {
+      ntk.set_level( n, -1 );
+    };
+
+    ntk._events->on_add.emplace_back( update_level_of_new_node );
+    ntk._events->on_modified.emplace_back( update_level_of_existing_node );
+    ntk._events->on_delete.emplace_back( update_level_of_deleted_node );
+  }
+
+  ~multithreaded_cut_enumeration_impl()
+  {
+    /* release resub engine */
+    // abcresub::Abc_ResubPrepareManager( 0 );
   }
 
   void enumerate_windows_test()
   {
+    bool verbose = true;
     window_manager windows( ntk, st );
 
     ntk.foreach_gate( [&]( node const& n ){
-        ++st.total_num_candidates;
+      ++st.total_num_candidates;
 
-        auto const result = windows.create_window( n );
-        if ( !result )
-        {
-          return true;
-        }
-
-        ++st.total_num_windows;
-        st.total_num_nodes += result->first.size();
-        st.total_num_leaves += result->second.size();
-
-        std::cout << "leaves = ";
-        for ( const auto& l : result->second )
-        {
-          std::cout << l << ' ';
-        }
-        std::cout << std::endl;
-
-        std::cout << "nodes = ";
-        for ( const auto& n : result->first )
-        {
-          std::cout << n << ' ';
-        }
-        std::cout << std::endl;
-
-        /* TOOD: ensure that the constant false is included in the window */
-        /* TODO: ensure that the nodes are topologically sorted */
-
-        /* make a view on the window */
-        window_view win( ntk, result->second, result->first );
-#if 0
-        std::cout << win.size() << std::endl;
-        std::cout << win.num_pis() << std::endl;
-        std::cout << win.num_pos() << std::endl;
-
-        std::cout<< "nodes: " << std::endl;
-        win.foreach_node( [&]( node const& n, uint32_t index ){
-            std::cout << index << ' ' << n << std::endl;
-          });
-
-        std::cout<< "pis: " << std::endl;
-        win.foreach_pi( [&]( node const& n, uint32_t index ){
-            std::cout << index << ' ' << n << std::endl;
-          });
-
-        std::cout<< "pos: " << std::endl;
-        win.foreach_po( [&]( signal const& s, uint32_t index ){
-            std::cout << index << ' ' << ( ntk.is_complemented( s ) ? '-' : '+' ) << ntk.get_node( s ) << std::endl;
-          });
-
-        std::cout<< "gates: " << std::endl;
-        win.foreach_gate( [&]( node const& n, uint32_t index ){
-            std::cout << index << ' ' << n << std::endl;
-          });
-#endif
-
-        /* simulate the window nodes */
-        default_simulator<kitty::dynamic_truth_table> sim( 6u );
-        auto tts = simulate_nodes<kitty::dynamic_truth_table>( win, sim );
-        win.foreach_node( [&]( node const& n, uint32_t index ){
-            fmt::print( "{:6}: {:6} {:64}\n", index, n, kitty::to_hex( tts[n] ) );
-          });
-
-        /* TODO: resubstitute the roots */
-
-        /* TODO: compute the gain */
-
-        /* TODO: rewrite the graph if gain is positive */
-
+      auto const result = windows.create_window( n );
+      if ( !result )
+      {
         return true;
-      });
+      }
+
+      /* TOOD: ensure that the constant false is included in the window */
+      /* TODO: ensure that the nodes are topologically sorted */
+
+      /* make a view on the window */
+      window_view win( ntk, result->second, result->first );
+
+      ++st.total_num_windows;
+      st.total_num_nodes += result->first.size();
+      st.total_num_leaves += result->second.size();
+
+      /* convert window into index list */
+      index_list indices;
+      encode( indices, win );
+
+      /* convert to mini AIG */
+      aig_network window_aig;
+      decode( window_aig, indices );
+      write_verilog( window_aig, std::cout );
+
+      /* optimize index list using the resubstitution algorithm */
+      auto const raw_array = indices.raw_data();
+      
+      abcresub::Abc_ResubPrepareManager( 1 );
+      int num_resubs;
+      int *new_indices_raw;
+      uint64_t new_entries = abcresub::Abc_ResubComputeWindow( raw_array.first, raw_array.second, 1000, -1, 0, 0, 0, 0, &new_indices_raw, &num_resubs );
+      fmt::print( "Performed resub {} times.  Reduced {} nodes.\n", num_resubs, new_entries > 0 ? raw_array.second - new_entries : 0 );
+      abcresub::Abc_ResubPrepareManager( 0 );
+      if ( new_entries == 0 )
+      {
+        return true; /* next */
+      }
+
+      index_list new_indices( new_indices_raw, 2*new_entries );
+      new_indices.print();
+
+      /* convert to mini AIG */
+      aig_network window_aig_new;
+      decode( window_aig_new, new_indices );
+      write_verilog( window_aig_new, std::cout );
+
+      /* TODO: verify that windows are equivalent */
+
+      /* substitute optimized window into the large network */
+      std::vector<signal> inputs;
+      win.foreach_pi( [&]( node const& n ){
+          inputs.emplace_back( n );
+        });
+
+      /* the window has to be normalized, such that outputs are not complemented */
+      std::vector<node> outputs;
+      win.foreach_po( [&]( signal const& s ){
+          if ( win.is_complemented( s ) )
+          {
+            std::cout << "ERROR: window outputs are not normalized" << std::endl;
+            std::abort();
+          }
+          else
+          {
+            outputs.emplace_back( ntk.get_node( s ) );
+          }
+        });
+
+      uint64_t counter = 0;
+      insert( ntk, std::begin( inputs ), std::end( inputs ), indices,
+              [&]( signal const& s ){
+                ntk.substitute_node( outputs.at( counter++ ), s );
+              });
+
+      return false;
+    });
   }
 
   void multithreaded_test()
@@ -1267,8 +1309,38 @@ public:
     ntk.set_value( n, ntk.value( n ) & 0 );
   }
 
+  /* maybe should move to depth_view */
+  void update_node_level( node const& n, bool top_most = true )
+  {
+    uint32_t curr_level = ntk.level( n );
+
+    uint32_t max_level = 0;
+    ntk.foreach_fanin( n, [&]( const auto& f ) {
+      auto const p = ntk.get_node( f );
+      auto const fanin_level = ntk.level( p );
+      if ( fanin_level > max_level )
+      {
+        max_level = fanin_level;
+      }
+    } );
+    ++max_level;
+
+    if ( curr_level != max_level )
+    {
+      ntk.set_level( n, max_level );
+
+      /* update only one more level */
+      if ( top_most )
+      {
+        ntk.foreach_fanout( n, [&]( const auto& p ) {
+          update_node_level( p, false );
+        } );
+      }
+    }
+  }
+
 private:
-  Ntk const& ntk;
+  Ntk& ntk;
   multithreaded_cut_enumeration_params const& ps;
   multithreaded_cut_enumeration_stats& st;
 }; /* multithreaded_cut_enumeration_impl */

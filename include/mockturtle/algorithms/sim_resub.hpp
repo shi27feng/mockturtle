@@ -38,7 +38,6 @@
 #include "../utils/abc_resub.hpp"
 #include "../utils/progress_bar.hpp"
 #include "../utils/stopwatch.hpp"
-#include "../utils/abc_resub.hpp"
 
 #include <bill/sat/interface/abc_bsat2.hpp>
 #include <bill/sat/interface/z3.hpp>

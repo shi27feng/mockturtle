@@ -33,7 +33,9 @@
 #pragma once
 
 #include <kitty/kitty.hpp>
-#include <abcresub/abcresub.hpp>
+#include <abcresub/abcresub2.hpp>
+#include <vector>
+#include <optional>
 
 namespace mockturtle
 {
@@ -168,6 +170,8 @@ protected:
     assert( abc_divs == nullptr );
     abc_tts = abcresub::Vec_WrdAlloc( num_divisors * num_blocks_per_truth_table );
     abc_divs = abcresub::Vec_PtrAlloc( num_divisors );
+    assert( abc_tts != nullptr );
+    assert( abc_divs != nullptr );
   }
 
   void release()
