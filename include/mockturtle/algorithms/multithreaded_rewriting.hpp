@@ -604,8 +604,8 @@ public:
   static constexpr uint64_t const max_levels = 5u;
 
 public:
-  using node   = node<Ntk>;
-  using signal = signal<Ntk>;
+  using node   = typename Ntk::node;
+  using signal = typename Ntk::signal;
 
 public:
   explicit window_manager( Ntk const& ntk, multithreaded_cut_enumeration_stats& st )
@@ -773,8 +773,8 @@ private:
         continue;
 
       ntk.foreach_fanin( n, [&]( signal const& fi ){
-        if ( ntk.is_dead( ntk.get_node( fi ) ) )
-          return true;
+	  if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	    return true;
 
           /* if the node was visited on the paths to both fanins, collect it */
           if ( ntk.visited( n ) >= ntk.trav_id() - 1u &&
@@ -891,8 +891,8 @@ private:
       assert( !ntk.is_constant( n ) && !ntk.is_ci( n ) && "node is not a gate" );
 
       ntk.foreach_fanin( n, [&]( signal const& fi ){
-        if ( ntk.is_dead( ntk.get_node( fi ) ) )
-          return true;
+	  if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	    return true;
 
           node const& fanin_node = ntk.get_node( fi );
           if ( ntk.visited( fanin_node ) == ntk.trav_id() )
@@ -961,8 +961,8 @@ private:
             /* ensure that fanins are in the window */
             bool fanins_are_in_the_window = true;
             ntk.foreach_fanin( fo, [&]( signal const& fi ){
-              if ( ntk.is_dead( ntk.get_node( fi ) ) )
-                return true;
+		if ( ntk.is_dead( ntk.get_node( fi ) ) )
+		  return true;
 
                 if ( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() )
                 {
@@ -1015,8 +1015,8 @@ private:
         /* skip if none of the fanins has been marked */
         bool no_fanin_marked = true;
         ntk.foreach_fanin( input, [&]( signal const& fi ){
-          if ( ntk.is_dead( ntk.get_node( fi ) ) )
-            return true;
+	    if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	      return true;
 
             if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
             {
@@ -1038,8 +1038,8 @@ private:
         assert( std::find( std::begin( window_nodes ), std::end( window_nodes ), input ) != std::end( window_nodes ) );
 
         ntk.foreach_fanin( input, [&]( signal const& fi ){
-          if ( ntk.is_dead( ntk.get_node( fi ) ) )
-            return true;
+	    if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	      return true;
 
             if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
             {
@@ -1071,8 +1071,8 @@ private:
 
       std::vector<node> fis;
       ntk.foreach_fanin( i, [&]( signal const& fi ){
-        if ( ntk.is_dead( ntk.get_node( fi ) ) )
-          return true;
+	  if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	    return true;
 
           assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
           fis.emplace_back( ntk.get_node( fi ) );
@@ -1105,24 +1105,24 @@ private:
 
       std::vector<node> fanin_nodes;
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
-        if ( ntk.is_dead( ntk.get_node( fi ) ) )
-          return;
+	  if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	    return;
 
-        assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
-        assert( !ntk.is_dead( ntk.get_node( fi ) ) );
-        fanin_nodes.emplace_back( ntk.get_node( fi ) );
+	  assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
+	  assert( !ntk.is_dead( ntk.get_node( fi ) ) );
+	  fanin_nodes.emplace_back( ntk.get_node( fi ) );
       });
 
       try_adding_node( fanin_nodes, window_nodes );
       inputs.erase( std::remove( std::begin( inputs ), std::end( inputs ), *n ), std::end( inputs ) );
 
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
-        if ( ntk.is_dead( ntk.get_node( fi ) ) )
-          return;
+	  if ( ntk.is_dead( ntk.get_node( fi ) ) )
+	    return;
 
-        assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
-        assert( !ntk.is_dead( ntk.get_node( fi ) ) );
-        inputs.emplace_back( ntk.get_node( fi ) );
+	  assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
+	  assert( !ntk.is_dead( ntk.get_node( fi ) ) );
+	  inputs.emplace_back( ntk.get_node( fi ) );
       });
 
       expand_inputs( window_nodes, inputs );
@@ -1232,8 +1232,8 @@ template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
 public:
-  using node   = node<Ntk>;
-  using signal = signal<Ntk>;
+  using node   = typename Ntk::node;
+  using signal = typename Ntk::signal;
 
 public:
   explicit multithreaded_cut_enumeration_impl( Ntk& ntk, multithreaded_cut_enumeration_params const& ps, multithreaded_cut_enumeration_stats& st )
@@ -1528,12 +1528,12 @@ public:
 
     uint32_t max_level = 0;
     ntk.foreach_fanin( n, [&]( const auto& f ) {
-      auto const p = ntk.get_node( f );
-      auto const fanin_level = ntk.level( p );
-      if ( fanin_level > max_level )
-      {
-        max_level = fanin_level;
-      }
+	auto const p = ntk.get_node( f );
+	auto const fanin_level = ntk.level( p );
+	if ( fanin_level > max_level )
+	{
+	  max_level = fanin_level;
+	}
     } );
     ++max_level;
 

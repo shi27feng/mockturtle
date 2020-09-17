@@ -39,10 +39,7 @@ int main()
   using namespace experiments;
   using namespace mockturtle;
 
-
-  for ( auto const& benchmark : epfl_benchmarks() )
-
-  experiment<std::string, uint64_t, uint64_t, double, bool>
+  experiments::experiment<std::string, uint64_t, uint64_t, double, bool>
     exp( "multithreaded_rewriting", "benchmark", "size_before", "size_after", "time", "equivalent" );
 
   for ( auto const& benchmark : epfl_benchmarks( ~experiments::hyp ) )
@@ -65,7 +62,7 @@ int main()
 
     uint64_t const size_after = aig.num_gates();
 
-    auto const cec = benchmark == "hyp" ? true : abc_cec( aig, benchmark );
+    bool const cec = benchmark == "hyp" ? true : abc_cec( aig, benchmark );
     exp( benchmark, size_before, size_after, to_seconds( st.time_total ),
          cec );
   }
