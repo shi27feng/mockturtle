@@ -608,8 +608,9 @@ public:
   using signal = signal<Ntk>;
 
 public:
-  explicit window_manager( Ntk const& ntk )
+  explicit window_manager( Ntk const& ntk, multithreaded_cut_enumeration_stats& st )
     : ntk( ntk )
+    , st( st )
     , levels( ntk.depth() + 1u )
     , paths( ntk.size() )
     , size ( ntk.size() )
@@ -1266,7 +1267,7 @@ public:
 
   void enumerate_windows_test()
   {
-    window_manager windows( ntk );
+    window_manager windows( ntk, st );
 
     // progress_bar pbar{ntk.size(), "resub |{0}| node = {1:>4}   cand = {2:>4}   est. gain = {3:>5}", ps.progress};
 
