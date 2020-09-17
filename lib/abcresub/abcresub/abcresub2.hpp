@@ -262,7 +262,29 @@ inline int Gia_Rsb2AddNode( Vec_Int_t * vRes, int iLit0, int iLit1, int iRes0, i
     int iLitMax = iRes0 < iRes1 ? Abc_LitNotCond(iRes1, Abc_LitIsCompl(iLit1)) : Abc_LitNotCond(iRes0, Abc_LitIsCompl(iLit0));
     int iLitRes = Vec_IntSize(vRes);
     if ( iLit0 < iLit1 ) // and
+    {
+        if ( iLitMin == 0 )
+            return 0;
+        if ( iLitMin == 1 )
+            return iLitMax;
+        if ( iLitMin == Abc_LitNot(iLitMax) )
+            return 0;
+    }
+    else if ( iLit0 > iLit1 ) // xor
+    {
+        if ( iLitMin == 0 )
+            return iLitMax;
+        if ( iLitMin == 1 )
+            return Abc_LitNot(iLitMax);
+        if ( iLitMin == Abc_LitNot(iLitMax) )
+            return 1;
+    }
+    else assert( 0 );
+    assert( iLitMin >= 2 && iLitMax >= 2 );    
+    if ( iLit0 < iLit1 ) // and
+    {
         Vec_IntPushTwo( vRes, iLitMin, iLitMax );
+    }
     else if ( iLit0 > iLit1 ) // xor
     {
         assert( !Abc_LitIsCompl(iLit0) );
@@ -375,8 +397,8 @@ inline int Abc_ResubComputeWindow( int * pObjs, int nObjs, int nDivsMax, int nLe
             Vec_IntAppend( &p->vObjs, vRes );
             Vec_IntFree( vRes );
             Vec_IntForEachEntry( &p->vTried, iTried, i )
-                if ( Vec_IntEntry(&p->vCopies, i) > 0 )
-                    Vec_IntWriteEntry( &p->vTried, k++, iTried );
+                if ( Vec_IntEntry(&p->vCopies, iTried) > Abc_Var2Lit(p->nPis, 0) ) // internal node
+                    Vec_IntWriteEntry( &p->vTried, k++, Abc_Lit2Var(Vec_IntEntry(&p->vCopies, iTried)) );            
             Vec_IntShrink( &p->vTried, k );
             nChanges++;
             //Gia_Rsb2ManPrint( p );

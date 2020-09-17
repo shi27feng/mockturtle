@@ -128,13 +128,21 @@ int main()
     multithreaded_cut_enumeration_params ps;
     multithreaded_cut_enumeration_stats st;
     multithreaded_cut_enumeration( aig, ps, &st );
+    std::cout << "cleanup" << std::endl;
     aig = cleanup_dangling( aig );
+    write_verilog( aig, "div1.v" );
     multithreaded_cut_enumeration( aig, ps, &st );
+    std::cout << "cleanup" << std::endl;
     aig = cleanup_dangling( aig );
+    write_verilog( aig, "div2.v" );
     multithreaded_cut_enumeration( aig, ps, &st );
-    aig = cleanup_dangling( aig );    
-    multithreaded_cut_enumeration( aig, ps, &st );
+    std::cout << "cleanup" << std::endl;
     aig = cleanup_dangling( aig );
+    write_verilog( aig, "div3.v" );
+    multithreaded_cut_enumeration( aig, ps, &st );
+    std::cout << "cleanup" << std::endl;
+    aig = cleanup_dangling( aig );
+    write_verilog( aig, "div4.v" );
 
     depth_view depth_aig1{aig};
     
