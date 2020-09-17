@@ -62,6 +62,7 @@ public:
 public:
   explicit index_list() {}
 
+#if 0
   explicit index_list( int* lits, uint64_t num_lits )
     : literals( lits, lits + num_lits )
   {
@@ -81,6 +82,7 @@ public:
   {
     return std::make_pair<int*, uint64_t>( (int*)&literals[0], literals.size() / 2 );
   }
+#endif
 
   void push2( element_type lit )
   {
@@ -88,8 +90,8 @@ public:
     {
       ++num_zero_entries;
     }
-    literals.emplace_back( lit );
-    literals.emplace_back( lit );
+    literals.push_back( lit );
+    literals.push_back( lit );
   }
 
   void push2( element_type lit0, element_type lit1 )
@@ -98,8 +100,8 @@ public:
     {
       ++num_zero_entries;
     }
-    literals.emplace_back( lit0 );
-    literals.emplace_back( lit1 );
+    literals.push_back( lit0 );
+    literals.push_back( lit1 );
   }
 
   uint64_t num_entries() const
@@ -107,17 +109,17 @@ public:
     return ( literals.size() >> 1 );
   }
 
-  void print_raw() const
-  {
-    assert( literals.size() % 2 == 0 );
-    auto const raw_array = raw_data();
-    std::cout << raw_array.second << std::endl;
-    for ( uint64_t i = 0; i < raw_array.second*2; ++i )
-    {
-      std::cout << raw_array.first[i] << ' ';
-    }
-    std::cout << std::endl;
-  }
+  // void print_raw() const
+  // {
+  //   assert( literals.size() % 2 == 0 );
+  //   auto const raw_array = raw_data();
+  //   std::cout << raw_array.second << std::endl;
+  //   for ( uint64_t i = 0; i < raw_array.second*2; ++i )
+  //   {
+  //     std::cout << raw_array.first[i] << ' ';
+  //   }
+  //   std::cout << std::endl;
+  // }
 
   void print() const
   {
@@ -223,7 +225,7 @@ void decode( Ntk& ntk, index_list const& indices )
   std::vector<signal> signals;
   for ( uint64_t i = 0; i < indices.num_pis(); ++i )
   {
-    signals.emplace_back( ntk.create_pi() );
+    signals.push_back( ntk.create_pi() );
   }
 
   insert( ntk, std::begin( signals ), std::end( signals ), indices,
@@ -240,10 +242,10 @@ void insert( Ntk& ntk, BeginIter begin, EndIter end, index_list const& indices, 
   signals.emplace_back( ntk.get_constant( false ) );
   for ( auto it = begin; it != end; ++it )
   {
-    signals.emplace_back( *it );
+    signals.push_back( *it );
   }
 
-  indices.foreach_entry( [&]( uint64_t lit0, uint64_t lit1 ){
+  indices.foreach_entry( [&]( uint32_t lit0, uint32_t lit1 ){
       /* skip constant and inputs */
       if ( lit0 == 0 && lit1 == 0 )
       {
@@ -266,12 +268,12 @@ void insert( Ntk& ntk, BeginIter begin, EndIter end, index_list const& indices, 
       /* AND gates */
       else if ( i0 < i1 )
       {
-        signals.emplace_back( ntk.create_and( s0, s1 ) );
+        signals.push_back( ntk.create_and( s0, s1 ) );
       }
       /* XOR gates */
       else
       {
-        signals.emplace_back( ntk.create_xor( s0, s1 ) );
+        signals.push_back( ntk.create_xor( s0, s1 ) );
       }
     });
 }
@@ -294,10 +296,26 @@ public:
     /* all leaves are also stored in nodes */
     assert( nodes.size() >= leaves.size() );
 
-    /* add constant node to nodes if necessary */
+    /* add constant node at the beginning of nodes if necessary */
     if ( this->nodes.begin() != this->nodes.end() && *this->nodes.begin() != 0u )
     {
       this->nodes.insert( std::begin( this->nodes ), 0u );
+    }
+
+    std::vector<int32_t> refs( ntk.size() );
+    for ( const auto& n : this->nodes )
+    {
+      if ( ntk.is_and( n ) )
+      {
+        ntk.foreach_fanin( n, [&]( signal const& fi ){
+            refs[ntk.get_node( fi )] += 1;
+          });
+      }
+    }
+
+    for ( const auto& l : leaves )
+    {
+      refs[l] = ntk.fanout_size( l );
     }
 
     /* compute node_to_index */
@@ -307,32 +325,20 @@ public:
       node_to_index_map[n] = index++;
     }
 
-    std::vector<int32_t> refs( ntk.size() );
-    for ( const auto& n : nodes )
-    {
-      if ( ntk.is_and( n ) )
-      {
-        ntk.foreach_fanin( n, [&]( signal const& fi ){
-            refs[ntk.get_node( fi )] += 1;
-          });
-      }
-    }
-    for ( const auto& l : leaves )
-    {
-      refs[l] = ntk.fanout_size( l );
-    }
-    for ( const auto& n : nodes )
+    for ( const auto& n : this->nodes )
     {
       if ( n == 0 )
       {
         continue;
       }
+
       if ( int32_t( ntk.fanout_size( n ) ) != refs[n] )
       {
         roots.emplace_back( ntk.make_signal( n ) );
       }
     }
-    for ( const auto& n : nodes )
+
+    for ( const auto& n : this->nodes )
     {
       if ( ntk.is_and( n ) )
       {
@@ -371,6 +377,7 @@ public:
 
   inline auto node_to_index( node const& n ) const
   {
+    assert( node_to_index_map.find( n ) != std::end( node_to_index_map ) );
     return node_to_index_map.at( n );
   }
 
@@ -601,17 +608,21 @@ public:
   using signal = signal<Ntk>;
 
 public:
-  explicit window_manager( Ntk const& ntk, multithreaded_cut_enumeration_stats& st )
+  explicit window_manager( Ntk const& ntk )
     : ntk( ntk )
-    , st( st )
     , levels( ntk.depth() + 1u )
     , paths( ntk.size() )
+    , size ( ntk.size() )
   {
   }
 
   std::optional<std::pair<std::vector<node>,std::vector<node>>> create_window( node const& pivot )
   {
     stopwatch t( st.time_create_window );
+
+    /* resize paths */
+    levels.resize( ntk.depth() + 1 );
+    paths.resize( ntk.size() );
 
     std::optional<std::vector<node>> window_nodes = initialize_window( pivot );
     if ( !window_nodes )
@@ -631,9 +642,56 @@ public:
     {
       std::sort( std::begin( window_leaves ), std::end( window_leaves ) );
 
+      /* ensure that no window node is dead */
+      for ( const auto& n : *window_nodes )
+      {
+        if ( ntk.is_dead( n ) || n >= size )
+        {
+          return std::nullopt;
+        }
+
+        bool dead_window = false;
+        ntk.foreach_fanin( n, [&]( signal const& fi ){
+          if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          {
+            dead_window = true;
+            return false;
+          }
+          return true;
+        });
+
+        if ( dead_window )
+        {
+          return std::nullopt;
+        }
+      }
+
       /* topologically sort the nodes */
       auto const sorted_nodes = topo_sort( *window_nodes, window_leaves );
       // std::sort( std::begin( *window_nodes ), std::end( *window_nodes ) );
+
+      /* ensure that no window leave is dead */
+      for ( const auto& n : window_leaves )
+      {
+        if ( ntk.is_dead( n ) )
+          return std::nullopt;
+
+        bool dead_window = false;
+        ntk.foreach_fanin( n, [&]( signal const& fi ){
+          if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          {
+            dead_window = true;
+            return false;
+          }
+          return true;
+        });
+
+        if ( dead_window )
+        {
+          return std::nullopt;
+        }
+      }
+
       return std::make_pair( sorted_nodes, window_leaves );
     }
     else
@@ -666,17 +724,15 @@ public:
 
   void topo_sort_recur( std::vector<node>& topo_order, node const& n )
   {
-    if ( ntk.visited( n ) == ntk.trav_id() )
-    {
+    if ( ntk.is_dead( n ) || ntk.visited( n ) == ntk.trav_id() )
       return;
-    }
 
     ntk.foreach_fanin( n, [&]( signal const& s ){
-        if ( ntk.visited( ntk.get_node( s ) ) != ntk.trav_id() )
-        {
-          topo_sort_recur( topo_order, ntk.get_node( s ) );
-        }
-      });
+      if ( ntk.visited( ntk.get_node( s ) ) != ntk.trav_id() )
+      {
+        topo_sort_recur( topo_order, ntk.get_node( s ) );
+      }
+    });
 
     /* all have been visited */
     ntk.set_visited( n, ntk.trav_id() );
@@ -687,10 +743,10 @@ private:
   /* collect nodes on the path recursively from the meeting point to the root node, excluding the meeting point */
   void gather( node const& n, std::vector<node>& visited )
   {
-    if ( n == 0u )
+    if ( n == 0u || ntk.is_dead( n ) )
       return;
-
     visited.emplace_back( n );
+
     auto const prev = paths[n];
     if ( prev == 0 )
       return;
@@ -712,10 +768,13 @@ private:
     for ( uint64_t i = start; i < end; ++i )
     {
       node const& n = visited.at( i );
-      if ( ntk.is_constant( n ) || ntk.is_ci( n ) )
+      if ( ntk.is_constant( n ) || ntk.is_ci( n ) || ntk.is_dead( n ) )
         continue;
 
       ntk.foreach_fanin( n, [&]( signal const& fi ){
+        if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          return true;
+
           /* if the node was visited on the paths to both fanins, collect it */
           if ( ntk.visited( n ) >= ntk.trav_id() - 1u &&
                ntk.visited( ntk.get_node( fi ) ) >= ntk.trav_id() - 1u &&
@@ -736,8 +795,10 @@ private:
 
           /* label the node as visited */
           ntk.set_visited( ntk.get_node( fi ), ntk.visited( n ) );
+          assert( paths.size() > ntk.get_node( fi ) );
           paths[ntk.get_node( fi )] = n;
-          visited.emplace_back( ntk.get_node( fi ) );
+
+          visited.push_back( ntk.get_node( fi ) );
           return true; /* next */
         });
 
@@ -751,20 +812,27 @@ private:
 
   std::optional<std::vector<node>> initialize_window( node const& pivot )
   {
+    assert( !ntk.is_constant( pivot ) && !ntk.is_ci( pivot ) && !ntk.is_dead( pivot ) );
+
     stopwatch t( st.time_initialize_window );
 
-    std::vector<node> visited( 100u );
-    assert( !ntk.is_constant( pivot ) && !ntk.is_ci( pivot ) );
+    std::vector<node> visited;
+    visited.reserve( 150u ); /* reserve more memory to avoid memory issues */
 
     uint64_t start{0};
 
     /* start paths for both fanins of the pivot node */
     ntk.foreach_fanin( pivot, [&]( signal const& fi ){
-        ntk.incr_trav_id();
-        visited.emplace_back( ntk.get_node( fi ) );
-        paths[ntk.get_node( fi )] = 0;
-        ntk.set_visited( ntk.get_node( fi ), ntk.trav_id() );
-      });
+      if ( ntk.is_dead( ntk.get_node( fi ) ) )
+        return true;
+
+      ntk.incr_trav_id();
+      visited.push_back( ntk.get_node( fi ) );
+      assert( paths.size() > ntk.get_node( fi ) );
+      paths[ntk.get_node( fi )] = 0;
+      ntk.set_visited( ntk.get_node( fi ), ntk.trav_id() );
+      return true;
+    });
 
     /* perform several iterations of breath-first search */
     uint64_t i = 0u;
@@ -782,7 +850,8 @@ private:
         visited.clear();
         gather( paths[meet], visited );
         gather( n, visited );
-        visited.emplace_back( pivot );
+        assert( !ntk.is_dead( pivot ) );
+        visited.push_back( pivot );
         break;
       }
 
@@ -817,14 +886,16 @@ private:
     /* collet fanins of these nodes as inputs */
     for ( auto const& n : window_nodes )
     {
+      assert( !ntk.is_dead( n ) );
       assert( !ntk.is_constant( n ) && !ntk.is_ci( n ) && "node is not a gate" );
 
       ntk.foreach_fanin( n, [&]( signal const& fi ){
+        if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          return true;
+
           node const& fanin_node = ntk.get_node( fi );
           if ( ntk.visited( fanin_node ) == ntk.trav_id() )
-          {
             return true;
-          }
 
           if ( std::find( std::begin( inputs ), std::end( inputs ), fanin_node ) == std::end( inputs ) )
           {
@@ -854,7 +925,11 @@ private:
     /* window nodes are labeled with the current traversal id */
     for ( node const& n : window_nodes )
     {
+      if ( ntk.is_dead( n ) )
+        continue;
+
       assert( ntk.visited( n ) == ntk.trav_id() );
+      assert( !ntk.is_dead( n ) );
       assert( ntk.level( n ) >= 0 );
       assert( ntk.level( n ) < levels.size() );
       levels[ntk.level( n )].push_back( n );
@@ -865,10 +940,14 @@ private:
     {
       for ( node const& n : level )
       {
+        assert( !ntk.is_dead( n ) );
         ntk.foreach_fanout( n, [&]( node const& fo, uint64_t index ){
             /* explore first 5 fanouts of the node */
             if ( index == 5u )
               return false;
+
+            if ( ntk.is_dead( fo ) )
+              return true;
 
             /* ensure that fo is an internal node */
             if ( ntk.is_constant( fo ) || ntk.is_ci( fo ) )
@@ -881,6 +960,9 @@ private:
             /* ensure that fanins are in the window */
             bool fanins_are_in_the_window = true;
             ntk.foreach_fanin( fo, [&]( signal const& fi ){
+              if ( ntk.is_dead( ntk.get_node( fi ) ) )
+                return true;
+
                 if ( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() )
                 {
                   fanins_are_in_the_window = false;
@@ -894,6 +976,7 @@ private:
             /* add fanout to the window and to the levelized structure */
             ntk.set_visited( fo, ntk.trav_id() );
             levels[ntk.level( fo )].emplace_back( fo );
+            assert( !ntk.is_dead( fo ) );
             window_nodes.emplace_back( fo );
             return true;
           });
@@ -922,7 +1005,7 @@ private:
         node const input = *it;
 
         /* skip all inputs that are not gates */
-        if ( ntk.is_constant( input ) || ntk.is_ci( input ) )
+        if ( ntk.is_constant( input ) || ntk.is_ci( input ) || ntk.is_dead( input ) )
         {
           ++it;
           continue; /* next */
@@ -931,6 +1014,9 @@ private:
         /* skip if none of the fanins has been marked */
         bool no_fanin_marked = true;
         ntk.foreach_fanin( input, [&]( signal const& fi ){
+          if ( ntk.is_dead( ntk.get_node( fi ) ) )
+            return true;
+
             if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
             {
               no_fanin_marked = false;
@@ -951,6 +1037,9 @@ private:
         assert( std::find( std::begin( window_nodes ), std::end( window_nodes ), input ) != std::end( window_nodes ) );
 
         ntk.foreach_fanin( input, [&]( signal const& fi ){
+          if ( ntk.is_dead( ntk.get_node( fi ) ) )
+            return true;
+
             if ( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() )
             {
               return true; /* next */
@@ -960,7 +1049,7 @@ private:
             inputs.emplace_back( ntk.get_node( fi ) );
 
             try_adding_node( { ntk.get_node( fi ) }, window_nodes );
-            assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
+            assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() || ntk.is_dead( ntk.get_node( fi ) ) );
             return true;
           });
 
@@ -976,13 +1065,17 @@ private:
 
     for ( node const& i : inputs )
     {
-      if ( ntk.is_constant( i ) || ntk.is_ci( i ) )
+      if ( ntk.is_constant( i ) || ntk.is_ci( i ) || ntk.is_dead( i ) )
         continue;
 
       std::vector<node> fis;
       ntk.foreach_fanin( i, [&]( signal const& fi ){
+        if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          return true;
+
           assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
           fis.emplace_back( ntk.get_node( fi ) );
+          return true;
         });
 
       std::vector<node> t;
@@ -1006,19 +1099,30 @@ private:
     std::optional<node> n;
     while ( inputs.size() < max_inputs && ( n = select_one_input( inputs ) ) )
     {
+      if ( ntk.is_dead( *n ) )
+        continue;
+
       std::vector<node> fanin_nodes;
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
-          assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
-          fanin_nodes.emplace_back( ntk.get_node( fi ) );
-        });
+        if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          return;
+
+        assert( ntk.visited( ntk.get_node( fi ) ) != ntk.trav_id() );
+        assert( !ntk.is_dead( ntk.get_node( fi ) ) );
+        fanin_nodes.emplace_back( ntk.get_node( fi ) );
+      });
 
       try_adding_node( fanin_nodes, window_nodes );
       inputs.erase( std::remove( std::begin( inputs ), std::end( inputs ), *n ), std::end( inputs ) );
 
       ntk.foreach_fanin( *n, [&]( signal const& fi ){
-          assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
-          inputs.emplace_back( ntk.get_node( fi ) );
-        });
+        if ( ntk.is_dead( ntk.get_node( fi ) ) )
+          return;
+
+        assert( ntk.visited( ntk.get_node( fi ) ) == ntk.trav_id() );
+        assert( !ntk.is_dead( ntk.get_node( fi ) ) );
+        inputs.emplace_back( ntk.get_node( fi ) );
+      });
 
       expand_inputs( window_nodes, inputs );
     }
@@ -1036,9 +1140,13 @@ private:
     /* add the pivots to the window and to the levelized structure */
     for ( node const& pivot : pivots )
     {
-      assert( ntk.visited( pivot ) != ntk.trav_id() && "pivot must not be part of the window" );
+      if ( ntk.is_dead( pivot ) )
+        continue;
 
+      assert( ntk.visited( pivot ) != ntk.trav_id() && "pivot must not be part of the window" );
       ntk.set_visited( pivot, ntk.trav_id() );
+      assert( !ntk.is_dead( pivot ) );
+      assert( levels.size() > ntk.level( pivot ) );
       levels[ntk.level( pivot )].emplace_back( pivot );
     }
 
@@ -1093,7 +1201,10 @@ private:
         }
         else /* it was a real run - permanently add to the node to the window */
         {
-          nodes.emplace_back( l );
+          if ( !ntk.is_dead( l ) )
+          {
+            nodes.emplace_back( l );
+          }
         }
       }
       level.clear();
@@ -1108,6 +1219,7 @@ private:
 
   std::vector<std::vector<node>> levels;
   std::vector<node> paths;
+  uint64_t size{0};
 };
 
 } /* namespace detail */
@@ -1119,7 +1231,7 @@ template<class Ntk>
 class multithreaded_cut_enumeration_impl
 {
 public:
-  using node = node<Ntk>;
+  using node   = node<Ntk>;
   using signal = signal<Ntk>;
 
 public:
@@ -1128,9 +1240,6 @@ public:
     , ps( ps )
     , st( st )
   {
-    /* prepare ABC's resubstitution engine (for 6-input functions) */
-    // abcresub::Abc_ResubPrepareManager( /* num_blocks = */ 1 );
-
     auto const update_level_of_new_node = [&]( const auto& n ) {
       ntk.resize_levels();
       update_node_level( n );
@@ -1153,16 +1262,26 @@ public:
 
   ~multithreaded_cut_enumeration_impl()
   {
-    /* release resub engine */
-    // abcresub::Abc_ResubPrepareManager( 0 );
   }
 
   void enumerate_windows_test()
   {
-    bool verbose = true;
-    window_manager windows( ntk, st );
+    window_manager windows( ntk );
 
-    ntk.foreach_gate( [&]( node const& n ){
+    // progress_bar pbar{ntk.size(), "resub |{0}| node = {1:>4}   cand = {2:>4}   est. gain = {3:>5}", ps.progress};
+
+    auto const size = ntk.num_gates();
+    ntk.foreach_gate( [&]( node const& n, auto i ) {
+      if ( i >= size )
+      {
+        return false; /* terminate */
+      }
+
+      if ( ntk.is_dead( n ) )
+      {
+        return true; /* next */
+      }
+
       ++st.total_num_candidates;
 
       auto const result = windows.create_window( n );
@@ -1171,6 +1290,22 @@ public:
         return true;
       }
 
+      // std::cout << "leaves = ";
+      // for ( const auto& node : result->second )
+      // {
+      //   std::cout << node << ' ';
+      // }
+      // std::cout << std::endl;
+
+      // std::cout << "nodes = ";
+      // for ( const auto& node : result->first )
+      // {
+      //   assert( !ntk.is_dead( node ) );
+      //   std::cout << node << ' ';
+      // }
+      // std::cout << std::endl;
+
+#if 1
       /* TOOD: ensure that the constant false is included in the window */
       /* TODO: ensure that the nodes are topologically sorted */
 
@@ -1184,28 +1319,57 @@ public:
       /* convert window into index list */
       index_list indices;
       encode( indices, win );
+      // indices.print();
+      // indices.print_raw();
 
+#if 0
       /* convert to mini AIG */
       aig_network window_aig;
       decode( window_aig, indices );
       write_verilog( window_aig, "win.v" );
+#endif
 
-      /* optimize index list using the resubstitution algorithm */
-      auto const raw_array = indices.raw_data();
-
-      abcresub::Abc_ResubPrepareManager( 1 );
-      int num_resubs;
-      int *new_indices_raw;
-      uint64_t new_entries = abcresub::Abc_ResubComputeWindow( raw_array.first, raw_array.second, 1000, -1, 0, 0, 0, 0, &new_indices_raw, &num_resubs );
-      fmt::print( "Performed resub {} times.  Reduced {} nodes.\n", num_resubs, new_entries > 0 ? raw_array.second - new_entries : 0 );
-      abcresub::Abc_ResubPrepareManager( 0 );
-      if ( new_entries == 0 )
+      index_list new_indices;
       {
-        return true; /* next */
+        int *indices_raw = ABC_CALLOC( int, 2*indices.num_entries()+1 );
+        uint64_t pos = 0;
+        indices.foreach_entry( [&]( uint32_t i, uint32_t j ){
+          indices_raw[pos] = i;
+          indices_raw[pos+1] = j;
+          pos+=2;
+        });
+
+        abcresub::Abc_ResubPrepareManager( 1 );
+        int *new_indices_raw = nullptr;
+        int num_resubs = 0;
+        uint64_t new_entries = abcresub::Abc_ResubComputeWindow( indices_raw, indices.num_entries(), 1000, -1, 0, 0, 0, 0, &new_indices_raw, &num_resubs );
+        abcresub::Abc_ResubPrepareManager( 0 );
+
+        if ( new_entries > 0 )
+        {
+          // fmt::print( "Performed resub {} times.  Reduced {} nodes.\n", num_resubs, new_entries > 0 ? indices.num_entries() - new_entries : 0 );          
+          for ( uint64_t i = 0; i < 2*new_entries; i+=2 )
+          {
+            new_indices.push2( new_indices_raw[i], new_indices_raw[i+1] );
+          }
+        }
+
+        if ( indices_raw )
+        {
+          ABC_FREE( indices_raw );
+        }
+        if ( new_indices_raw )
+        {
+          ABC_FREE( new_indices_raw );
+        }
+
+        if ( new_entries == 0 )
+        {
+          return true; /* next window */
+        }
       }
 
-      index_list new_indices( new_indices_raw, 2*new_entries );
-
+#if 0
       /* convert to mini AIG */
       aig_network window_aig_new;
       decode( window_aig_new, new_indices );
@@ -1213,11 +1377,37 @@ public:
 
       /* TODO: verify that windows are equivalent */
       system( "abc -c \"cec -n win.v win_opt.v\"" );
+#endif
+
+#if 0
+      /* optimize index list using the resubstitution algorithm */
+      auto const raw_array = indices.raw_data();
+
+      int num_resubs;
+      int *new_indices_raw;
+      uint64_t new_entries = abcresub::Abc_ResubComputeWindow( raw_array.first, raw_array.second, 1000, -1, 0, 0, 0, 0, &new_indices_raw, &num_resubs );
+      fmt::print( "Performed resub {} times.  Reduced {} nodes.\n", num_resubs, new_entries > 0 ? raw_array.second - new_entries : 0 );
+      if ( new_entries == 0 )
+      {
+        return true; /* next */
+      }
+
+      index_list new_indices( new_indices_raw, 2*new_entries );
+      ABC_FREE( new_indices_raw );
+
+      /* convert to mini AIG */
+      // aig_network window_aig_new;
+      // decode( window_aig_new, new_indices );
+      // write_verilog( window_aig_new, "win_opt.v" );
+
+      /* TODO: verify that windows are equivalent */
+      // system( "abc -c \"cec -n win.v win_opt.v\"" );
+#endif
 
       /* substitute optimized window into the large network */
       std::vector<signal> inputs;
       win.foreach_pi( [&]( node const& n ){
-          inputs.emplace_back( win.make_signal( n ) );
+          inputs.push_back( win.make_signal( n ) );
         });
 
       /* collect outputs and ensure that they are regular */
@@ -1230,7 +1420,7 @@ public:
           }
           else
           {
-            outputs.emplace_back( win.get_node( s ) );
+            outputs.push_back( win.get_node( s ) );
           }
         });
 
@@ -1245,13 +1435,14 @@ public:
                   return true;
                 }
 
-                fmt::print( "substitute node {} with signal {}{}\n",
-                            output, ntk.is_complemented( s ) ? "~" : "", ntk.get_node( s ) );
+                // fmt::print( "substitute node {} with signal {}{}\n",
+                //             output, ntk.is_complemented( s ) ? "~" : "", ntk.get_node( s ) );
                 ntk.substitute_node( output, s );
                 return true;
               });
+#endif
 
-      return false;
+      return true;
     });
   }
 
@@ -1297,10 +1488,10 @@ public:
 
       threads.enqueue( [=]{
           /* evaluate all cuts of the current node concurrently */
-          if ( ps.very_verbose )
-          {
-            fmt::print( "[i] evaluate cut for node at index {} ({}/{})\n", index, num_processed_nodes, ntk.size() );
-          }
+          // if ( ps.very_verbose )
+          // {
+          //   fmt::print( "[i] evaluate cut for node at index {} ({}/{})\n", index, num_processed_nodes, ntk.size() );
+          // }
         } );
 
       ++num_processed_nodes;
@@ -1372,7 +1563,7 @@ private:
 } /* namespace detail */
 
 template<class Ntk>
-void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {}, multithreaded_cut_enumeration_stats *pst = nullptr )
+void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeration_params const& ps = {}, multithreaded_cut_enumeration_stats* pst = nullptr )
 {
   depth_view<Ntk> ntk2{ntk};
   fanout_view<decltype( ntk2 )> ntk3{ntk2};
@@ -1380,10 +1571,7 @@ void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeratio
   multithreaded_cut_enumeration_stats st;
   detail::multithreaded_cut_enumeration_impl cut_enum( ntk3, ps, st );
   cut_enum.run();
-  if ( ps.verbose )
-  {
-    st.report();
-  }
+
   if ( pst )
   {
     *pst = st;

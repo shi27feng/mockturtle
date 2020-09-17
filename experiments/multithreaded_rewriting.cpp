@@ -39,13 +39,13 @@ int main()
   using namespace experiments;
   using namespace mockturtle;
 
-  experiment<std::string, uint64_t, uint64_t, double, double, double, uint64_t, double, double, bool>
-    exp( "multithreaded_rewriting", "benchmark", "size_before", "size_after",
-         "avg. leaves", "avg. nodes", "win succ. rate", "num windows",
-         "create window time", "total runtime",
-         "equivalent" );
 
   for ( auto const& benchmark : epfl_benchmarks() )
+
+  experiment<std::string, uint64_t, uint64_t, double, bool>
+    exp( "multithreaded_rewriting", "benchmark", "size_before", "size_after", "time", "equivalent" );
+
+  for ( auto const& benchmark : epfl_benchmarks( ~experiments::hyp & experiments::div ) )
   {
     fmt::print( "[i] processing {}\n", benchmark );
 
@@ -65,14 +65,8 @@ int main()
 
     uint64_t const size_after = aig.num_gates();
 
-    auto const cec = abc_cec( aig, benchmark );
-    exp( benchmark, size_before, size_after,
-         double( st.total_num_leaves ) / st.total_num_windows,
-         double( st.total_num_nodes ) / st.total_num_windows,
-         double( st.total_num_windows ) / st.total_num_candidates,
-         st.total_num_windows,
-         to_seconds( st.time_create_window ),
-         to_seconds( st.time_total ),
+    auto const cec = benchmark == "hyp" ? true : abc_cec( aig, benchmark );
+    exp( benchmark, size_before, size_after, to_seconds( st.time_total ),
          cec );
   }
 
