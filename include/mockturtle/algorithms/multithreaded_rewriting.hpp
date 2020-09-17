@@ -1265,6 +1265,68 @@ public:
   {
   }
 
+  void kresub_aig_test()
+  {
+    static uint64_t counter = 0ul;
+    
+    window_manager windows( ntk, st );
+    ntk.foreach_gate( [&]( node const& n ){
+	auto const result = windows.create_window( n );
+	if ( !result )
+	{
+	  return true;
+	}
+
+	window_view window( ntk, result->second, result->first );
+	index_list indices;
+	encode( indices, window );
+
+	index_list new_indices;
+	{
+	  int *indices_raw = ABC_CALLOC( int, 2*indices.num_entries()+1 );
+	  uint64_t pos = 0;
+	  indices.foreach_entry( [&]( uint32_t i, uint32_t j ){
+	      indices_raw[pos] = i;
+	      indices_raw[pos+1] = j;
+	      pos+=2;
+	    });
+
+	  abcresub::Abc_ResubPrepareManager( 1 );
+	  int *new_indices_raw = nullptr;
+	  int num_resubs = 0;
+	  uint64_t new_entries = abcresub::Abc_ResubComputeWindow( indices_raw, indices.num_entries(), 1000, -1, 0, 0, 0, 0, &new_indices_raw, &num_resubs );
+	  abcresub::Abc_ResubPrepareManager( 0 );
+
+	  fmt::print( "Performed resub {} times.  Reduced {} nodes.\n", num_resubs, new_entries > 0 ? indices.num_entries() - new_entries : 0 );          
+	  
+	  if ( new_entries > 0 )
+	  {
+	    for ( uint64_t i = 0; i < 2*new_entries; i+=2 )
+	      {
+		new_indices.push2( new_indices_raw[i], new_indices_raw[i+1] );
+	      }
+	  }
+	  else if ( new_entries == 0 )
+	  {
+	    aig_network window_aig;
+	    decode( window_aig, indices );
+	    write_verilog( window_aig, fmt::format( "win{}.v", counter++ ) );
+	  }
+	  
+	  if ( indices_raw )
+	  {
+	    ABC_FREE( indices_raw );
+	  }
+	  if ( new_indices_raw )
+	  {
+	    ABC_FREE( new_indices_raw );
+	  }
+	}
+
+	return true;
+      });
+  }
+  
   void enumerate_windows_test()
   {
     window_manager windows( ntk, st );
@@ -1577,6 +1639,18 @@ void multithreaded_cut_enumeration( Ntk const& ntk, multithreaded_cut_enumeratio
   {
     *pst = st;
   }
+}
+
+template<class Ntk>
+void kresub_aig_test( Ntk const& ntk )
+{
+  depth_view<Ntk> ntk2{ntk};
+  fanout_view<decltype( ntk2 )> ntk3{ntk2};
+
+  multithreaded_cut_enumeration_params ps;
+  multithreaded_cut_enumeration_stats st;
+  detail::multithreaded_cut_enumeration_impl cut_enum( ntk3, ps, st );
+  cut_enum.kresub_aig_test();
 }
 
 } /* namespace mockturtle */
