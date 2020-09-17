@@ -45,7 +45,7 @@ int main()
   experiment<std::string, uint64_t, uint64_t, double, bool>
     exp( "multithreaded_rewriting", "benchmark", "size_before", "size_after", "time", "equivalent" );
 
-  for ( auto const& benchmark : epfl_benchmarks( ~experiments::hyp & experiments::div ) )
+  for ( auto const& benchmark : epfl_benchmarks( ~experiments::hyp ) )
   {
     fmt::print( "[i] processing {}\n", benchmark );
 
