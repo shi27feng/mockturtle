@@ -30,11 +30,14 @@
   \author Mathias Soeken
 */
 
+#include <mockturtle/io/write_bench.hpp>
+
 #include <array>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -43,7 +46,7 @@
 
 #include <fmt/color.h>
 #include <fmt/format.h>
-#include <mockturtle/io/write_bench.hpp>
+#include <matplot/matplotlibcpp.h>
 #include <nlohmann/json.hpp>
 
 namespace experiments
@@ -535,6 +538,138 @@ bool abc_cec( Ntk const& ntk, std::string const& benchmark )
   }
 
   return false;
+}
+
+template<class NtkA, class NtkB>
+bool abc_cec2( NtkA const& a, NtkB const& b )
+{
+  mockturtle::write_bench( a, "/tmp/a.bench" );
+  mockturtle::write_bench( b, "/tmp/b.bench" );
+
+  std::string const command = "abc -q \"cec -n /tmp/a.bench /tmp/b.bench\"";
+
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype( &pclose )> pipe( popen( command.c_str(), "r" ), pclose );
+  if ( !pipe )
+  {
+    throw std::runtime_error( "popen() failed" );
+  }
+  while ( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
+  {
+    result += buffer.data();
+  }
+
+  /* search for one line which says "Networks are equivalent" and ignore all other debug output from ABC */
+  std::stringstream ss( result );
+  std::string line;
+  while ( std::getline( ss, line, '\n' ) )
+  {
+    if ( line.size() >= 23u && line.substr( 0u, 23u ) == "Networks are equivalent" )
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+struct abc_script_stats
+{
+  double time{0.0};
+  uint64_t size{0};
+  uint64_t depth{0};
+};
+
+abc_script_stats abc_script( std::string const& filename, std::string const& script )
+{
+  std::string command = fmt::format( "abc -c \"{}; {}; print_stats; write temp.aig\"", filename, script );
+
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype( &pclose )> pipe( popen( command.c_str(), "r" ), pclose );
+  if ( !pipe )
+  {
+    throw std::runtime_error( "popen() failed" );
+  }
+  while ( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
+  {
+    result += buffer.data();
+  }
+  
+  std::stringstream ss( result );
+  std::string line;
+
+  std::smatch sm;
+
+  abc_script_stats st;
+  while ( std::getline( ss, line, '\n' ) )
+  {
+    if ( std::regex_match( line, sm, std::regex( R"(TOTAL\s+=\s+([0-9\.]+).*))" ) ) )
+    {
+      // std::cout << "MATCHED: " << std::stod( sm[1] ) << std::endl;
+      st.time = std::stod( sm[1] );
+    }
+
+    if ( std::regex_search( line, sm, std::regex( R"(and\s*=\s*([0-9]+))" ) ) )
+    {
+      // std::cout << "MATCHED: " << std::stoul( sm[1] ) << ' ' << std::endl;
+      st.size = std::stoul( sm[1] );
+    }
+
+    if ( std::regex_search( line, sm, std::regex( R"(lev\s*=\s*([0-9]+))" ) ) )
+    {
+      // std::cout << "MATCHED: " << std::stoul( sm[1] ) << ' ' << std::endl;
+      st.depth = std::stoul( sm[1] );
+    }
+  }
+
+  return st;
+}
+
+template<typename NumericX, typename NumericY>
+class plot
+{
+public:
+
+public:
+  explicit plot( std::string const& name, std::string const& format = ".-" )
+    : name( name )
+    , format( format )
+  {
+  }
+
+  void operator()( NumericX const& x, NumericY const& y )
+  {
+    xs.emplace_back( x );
+    ys.emplace_back( y );
+  }
+
+  std::pair<NumericX, NumericY> back() const
+  {
+    return std::make_pair( xs.back(), ys.back() );
+  }
+
+  void show()
+  {
+    matplotlibcpp::named_plot( name, xs, ys, format );    
+  }
+  
+private:
+  std::string const name;
+  std::string const format;
+
+  std::vector<NumericX> xs;
+  std::vector<NumericY> ys;
+}; /* plot */
+
+void write_plot( std::string const& filename, std::string const& title )
+{
+  namespace plt = matplotlibcpp;
+  plt::title( title );
+  plt::legend();
+  plt::save( filename );
+  plt::clf();
 }
 
 } // namespace experiments

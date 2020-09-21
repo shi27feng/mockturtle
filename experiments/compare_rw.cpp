@@ -35,64 +35,6 @@
 
 #include <string>
 
-namespace experiments
-{
-
-struct abc_script_stats
-{
-  double time{0.0};
-  uint64_t size{0};
-  uint64_t depth{0};
-};
-
-abc_script_stats abc_script( std::string const& benchmark, std::string const& script )
-{
-  std::string command = fmt::format( "abc -q \"{}; {}; print_stats;\"", benchmark_path( benchmark ), script );
-
-  std::array<char, 128> buffer;
-  std::string result;
-  std::unique_ptr<FILE, decltype( &pclose )> pipe( popen( command.c_str(), "r" ), pclose );
-  if ( !pipe )
-  {
-    throw std::runtime_error( "popen() failed" );
-  }
-  while ( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
-  {
-    result += buffer.data();
-  }
-  
-  std::stringstream ss( result );
-  std::string line;
-
-  std::smatch sm;
-
-  abc_script_stats st;
-  while ( std::getline( ss, line, '\n' ) )
-  {
-    if ( std::regex_match( line, sm, std::regex( R"(TOTAL\s+=\s+([0-9\.]+).*))" ) ) )
-    {
-      // std::cout << "MATCHED: " << std::stod( sm[1] ) << std::endl;
-      st.time = std::stod( sm[1] );
-    }
-
-    if ( std::regex_search( line, sm, std::regex( R"(and\s*=\s*([0-9]+))" ) ) )
-    {
-      // std::cout << "MATCHED: " << std::stoul( sm[1] ) << ' ' << std::endl;
-      st.size = std::stoul( sm[1] );
-    }
-
-    if ( std::regex_search( line, sm, std::regex( R"(lev\s*=\s*([0-9]+))" ) ) )
-    {
-      // std::cout << "MATCHED: " << std::stoul( sm[1] ) << ' ' << std::endl;
-      st.depth = std::stoul( sm[1] );
-    }
-  }
-
-  return st;
-}
-
-}
-
 int main()
 {
   using namespace experiments;
