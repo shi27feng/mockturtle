@@ -282,3 +282,59 @@ TEST_CASE( "Check leaves iterator -- easy case ", "[akers_synthesis]" )
     } );
   }
 }
+
+TEST_CASE( "Akers regressions", "[akers_synthesis]" )
+{
+  for ( std::string const& function : std::vector<std::string>{ "0000", "3333", "5555", "aaaa", "cccc", "f0f0", "0f0f", "ffff" } )
+  {
+    kitty::dynamic_truth_table f( 4 ), care( 4 );
+    create_from_hex_string( f, function );
+    for ( auto i = 0u; i < unsigned( f.num_bits() ); i++ )
+    {
+      set_bit( care, i );
+    }
+
+    std::vector<kitty::dynamic_truth_table> xs{6, kitty::dynamic_truth_table( 4 )};
+    xs[0] = f;
+    xs[1] = care;
+    kitty::create_nth_var( xs[2], 0 );
+    kitty::create_nth_var( xs[3], 1 );
+    kitty::create_nth_var( xs[4], 2 );
+    kitty::create_nth_var( xs[5], 3 );
+
+    mig_network mig = akers_synthesis<mig_network>( f, care );
+    if ( mig.size() > 4 )
+    {
+      mig.foreach_gate( [&]( auto n ) {
+        std::vector<kitty::dynamic_truth_table> fanin{3, kitty::dynamic_truth_table( 4 )};
+        mig.foreach_fanin( n, [&]( auto s, auto j ) {
+          if ( mig.node_to_index( mig.get_node( s ) ) == 0 )
+          {
+            fanin[j] = ~xs[1];
+          }
+          else
+          {
+            fanin[j] = xs[mig.node_to_index( mig.get_node( s ) ) + 1];
+          }
+        } );
+        xs.push_back( mig.compute( n, fanin.begin(), fanin.end() ) );
+      } );
+
+      mig.foreach_po( [&]( auto s ){
+        // std::cout << "[o] " << ( mig.is_complemented( s ) ? "~" : "" ) << mig.get_node( s ) << std::endl;
+        if ( mig.is_complemented( s ) )
+        {
+          // kitty::print_hex( ~xs[xs.size() - 1] );
+          // std::cout << std::endl;
+          CHECK( ~xs[xs.size() - 1] == f );
+        }
+        else
+        {
+          // kitty::print_hex( xs[xs.size() - 1] );
+          // std::cout << std::endl;
+          CHECK( xs[xs.size() - 1] == f );
+        }
+      });
+    }
+  }
+}
