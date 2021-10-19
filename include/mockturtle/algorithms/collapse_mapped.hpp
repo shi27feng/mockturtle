@@ -29,16 +29,26 @@
 
   \author Heinz Riener
   \author Mathias Soeken
+  \author Alessandro Tempia Calvino
 */
 
 #pragma once
 
 #include <optional>
+#include <algorithm>
+#include <iterator>
 #include <unordered_map>
 
 #include "../traits.hpp"
 #include "../utils/node_map.hpp"
+#include "../utils/window_utils.hpp"
 #include "../views/topo_view.hpp"
+#include "../views/fanout_view.hpp"
+#include "../views/color_view.hpp"
+#include "../views/window_view.hpp"
+#include "simulation.hpp"
+
+#include <kitty/dynamic_truth_table.hpp>
 
 namespace mockturtle
 {
@@ -164,6 +174,10 @@ public:
       }
     } );
 
+    fanout_view<NtkSource> fanout_ntk{ntk};
+    fanout_ntk.clear_visited();
+    color_view<fanout_view<NtkSource>> color_ntk{fanout_ntk};
+
     /* nodes */
     topo_view topo{ntk};
     topo.foreach_node( [&]( auto n ) {
@@ -175,21 +189,49 @@ public:
         children.push_back( node_to_signal[fanin] );
       } );
 
+      kitty::dynamic_truth_table tt;
+
+      if constexpr ( has_cell_function_v<NtkSource> )
+      {
+        tt = ntk.cell_function( n );
+      }
+      else
+      {
+        /* compute function constructing a window */
+        std::vector<node<NtkSource>> roots{n};
+        std::vector<node<NtkSource>> leaves;
+        
+        ntk.foreach_cell_fanin( n, [&]( auto fanin ) {
+          leaves.push_back( fanin );
+        } );
+
+        std::vector<node<NtkSource>> gates{collect_nodes( color_ntk, leaves, roots )};
+        window_view window_ntk{color_ntk, leaves, roots, gates};
+
+        using Ntk = mockturtle::window_view<mockturtle::color_view<mockturtle::fanout_view<NtkSource>>>;
+        default_simulator<kitty::dynamic_truth_table> sim( window_ntk.num_pis() );
+        unordered_node_map<kitty::dynamic_truth_table, Ntk> node_to_value( window_ntk );
+
+        simulate_nodes( window_ntk, node_to_value, sim );
+
+        tt = node_to_value[n];
+      }
+
       switch ( node_driver_type[n] )
       {
       default:
       case driver_type::none:
       case driver_type::pos:
-        node_to_signal[n] = dest.create_node( children, ntk.cell_function( n ) );
+        node_to_signal[n] = dest.create_node( children, tt );
         break;
 
       case driver_type::neg:
-        node_to_signal[n] = dest.create_node( children, ~ntk.cell_function( n ) );
+        node_to_signal[n] = dest.create_node( children, ~tt );
         break;
 
       case driver_type::mixed:
-        node_to_signal[n] = dest.create_node( children, ntk.cell_function( n ) );
-        opposites[n] = dest.create_node( children, ~ntk.cell_function( n ) );
+        node_to_signal[n] = dest.create_node( children, tt );
+        opposites[n] = dest.create_node( children, ~tt );
         break;
       }
     } );
@@ -250,7 +292,6 @@ private:
  * - `is_constant`
  * - `is_pi`
  * - `is_cell_root`
- * - `cell_function`
  * - `is_complemented`
  *
  * **Required network functions for return value (type NtkDest):**
@@ -276,7 +317,6 @@ std::optional<NtkDest> collapse_mapped_network( NtkSource const& ntk )
   static_assert( has_is_constant_v<NtkSource>, "NtkSource does not implement the is_constant method" );
   static_assert( has_is_pi_v<NtkSource>, "NtkSource does not implement the is_pi method" );
   static_assert( has_is_cell_root_v<NtkSource>, "NtkSource does not implement the is_cell_root method" );
-  static_assert( has_cell_function_v<NtkSource>, "NtkSource does not implement the cell_function method" );
   static_assert( has_is_complemented_v<NtkSource>, "NtkSource does not implement the is_complemented method" );
 
   static_assert( has_get_constant_v<NtkDest>, "NtkDest does not implement the get_constant method" );
@@ -324,7 +364,6 @@ std::optional<NtkDest> collapse_mapped_network( NtkSource const& ntk )
  * - `is_constant`
  * - `is_pi`
  * - `is_cell_root`
- * - `cell_function`
  * - `is_complemented`
  *
  * **Required network functions for return value (type NtkDest):**
@@ -350,7 +389,6 @@ bool collapse_mapped_network( NtkDest& dest, NtkSource const& ntk )
   static_assert( has_is_constant_v<NtkSource>, "NtkSource does not implement the is_constant method" );
   static_assert( has_is_pi_v<NtkSource>, "NtkSource does not implement the is_pi method" );
   static_assert( has_is_cell_root_v<NtkSource>, "NtkSource does not implement the is_cell_root method" );
-  static_assert( has_cell_function_v<NtkSource>, "NtkSource does not implement the cell_function method" );
   static_assert( has_is_complemented_v<NtkSource>, "NtkSource does not implement the is_complemented method" );
 
   static_assert( has_get_constant_v<NtkDest>, "NtkDest does not implement the get_constant method" );

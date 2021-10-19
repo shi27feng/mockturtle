@@ -44,6 +44,38 @@ TEST_CASE( "Mapped AIG into k-LUT network", "[collapse_mapped]" )
   } );
 }
 
+TEST_CASE( "Mapped AIG into k-LUT network without storing function", "[collapse_mapped]" )
+{
+  aig_network aig;
+
+  const auto a = aig.create_pi();
+  const auto b = aig.create_pi();
+  const auto f1 = aig.create_nand( a, b );
+  const auto f2 = aig.create_nand( f1, a );
+  const auto f3 = aig.create_nand( f1, b );
+  const auto f4 = aig.create_nand( f2, f3 );
+  aig.create_po( f4 );
+
+  mapping_view<aig_network, false> mapped_aig{aig};
+  lut_mapping<mapping_view<aig_network, false>, false>( mapped_aig );
+
+  const auto klut_opt = collapse_mapped_network<klut_network>( mapped_aig );
+
+  CHECK( klut_opt );
+  auto const& klut = *klut_opt;
+  CHECK( klut.size() == 5 );
+  CHECK( klut.num_gates() == 1 );
+  CHECK( mapped_aig.num_cells() == 1 );
+
+  kitty::dynamic_truth_table tt_xor( 2 );
+  kitty::create_from_hex_string( tt_xor, "6" );
+  klut.foreach_node( [&]( auto n ) {
+    if ( klut.is_constant( n ) || klut.is_pi( n ) )
+      return;
+    CHECK( klut.node_function( n ) == tt_xor );
+  } );
+}
+
 TEST_CASE( "Mapped AIG with positive output driver", "[collapse_mapped]" )
 {
   aig_network aig;
