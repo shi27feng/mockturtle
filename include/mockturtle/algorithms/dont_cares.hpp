@@ -67,7 +67,9 @@ namespace mockturtle
  * \param max_tfi_inputs Maximum number of inputs in the transitive fanin.
  */
 template<class Ntk>
-kitty::dynamic_truth_table satisfiability_dont_cares( Ntk const& ntk, std::vector<node<Ntk>> const& leaves, uint64_t max_tfi_inputs = 16u )
+kitty::dynamic_truth_table satisfiability_dont_cares( Ntk const& ntk, 
+                                                      std::vector<node<Ntk>> const& leaves, 
+                                                      uint64_t max_tfi_inputs = 16u )
 {
   reconvergence_driven_cut_parameters ps;
   ps.max_leaves = max_tfi_inputs;
@@ -112,7 +114,9 @@ kitty::dynamic_truth_table satisfiability_dont_cares( Ntk const& ntk, std::vecto
  * \param roots Set of root nodes
  */
 template<class Ntk>
-kitty::dynamic_truth_table observability_dont_cares( Ntk const& ntk, node<Ntk> const& n, std::vector<node<Ntk>> const& leaves, std::vector<node<Ntk>> const& roots )
+kitty::dynamic_truth_table observability_dont_cares( Ntk const& ntk, node<Ntk> const& n, 
+                                                     std::vector<node<Ntk>> const& leaves, 
+                                                     std::vector<node<Ntk>> const& roots )
 {
   fanout_view<Ntk> fanout_ntk{ ntk };
   fanout_ntk.clear_visited();

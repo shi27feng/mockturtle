@@ -5,7 +5,8 @@ namespace bill {
 namespace detail {
 
 template<typename T>
-inline std::vector<T> copy_vector_without_index(std::vector<T> const& vs, uint32_t index)
+inline std::vector<T> copy_vector_without_index(std::vector<T> const& vs, 
+                                                uint32_t index)
 {
 	assert(index < vs.size());
 	std::vector<T> copy(vs);
@@ -16,7 +17,8 @@ inline std::vector<T> copy_vector_without_index(std::vector<T> const& vs, uint32
 } // namespace detail
 
 template<typename Solver>
-inline result::clause_type trim_core_copy(Solver& solver, result::clause_type const& core,
+inline result::clause_type trim_core_copy(Solver& solver, 
+                                          result::clause_type const& core,
                                           uint32_t num_tries = 8u)
 {
 	auto current = core;
@@ -40,7 +42,8 @@ inline void trim_core(Solver& solver, result::clause_type& core, uint32_t num_tr
 }
 
 template<typename Solver>
-inline result::clause_type minimize_core_copy(Solver& solver, result::clause_type& core,
+inline result::clause_type minimize_core_copy(Solver& solver, 
+                                              result::clause_type& core,
                                               int64_t budget = 1000)
 {
 	auto pos = 0u;

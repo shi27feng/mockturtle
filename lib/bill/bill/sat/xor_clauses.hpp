@@ -19,7 +19,8 @@ namespace bill {
  * \return Literal y
  */
 template<typename Solver>
-lit_type add_xor_clause(Solver& solver, std::vector<lit_type> const& clause,
+lit_type add_xor_clause(Solver& solver, 
+                        std::vector<lit_type> const& clause,
                         lit_type::polarities pol = lit_type::polarities::positive)
 {
 	std::queue<lit_type> lits;

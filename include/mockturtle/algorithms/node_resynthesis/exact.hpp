@@ -129,23 +129,32 @@ template<class Ntk = klut_network>
 class exact_resynthesis
 {
 public:
-  explicit exact_resynthesis( uint32_t fanin_size = 3u, exact_resynthesis_params const& ps = {} )
+  explicit exact_resynthesis( uint32_t fanin_size = 3u, 
+                              exact_resynthesis_params const& ps = {} )
       : _fanin_size( fanin_size ),
         _ps( ps )
   {
   }
 
   template<typename LeavesIterator, typename Fn>
-  void operator()( Ntk& ntk, kitty::dynamic_truth_table const& function, LeavesIterator begin, LeavesIterator end, Fn&& fn ) const
+  void operator()( Ntk& ntk, 
+                   kitty::dynamic_truth_table const& function, 
+                   LeavesIterator begin, 
+                   LeavesIterator end, 
+                   Fn&& fn ) const
   {
     operator()( ntk, function, function.construct(), begin, end, fn );
   }
 
   template<typename LeavesIterator, typename Fn>
-  void operator()( Ntk& ntk, kitty::dynamic_truth_table const& function, kitty::dynamic_truth_table const& dont_cares, LeavesIterator begin, LeavesIterator end, Fn&& fn ) const
+  void operator()( Ntk& ntk, 
+                   kitty::dynamic_truth_table const& function, 
+                   kitty::dynamic_truth_table const& dont_cares, 
+                   LeavesIterator begin, 
+                   LeavesIterator end, 
+                   Fn&& fn ) const
   {
-    if ( static_cast<uint32_t>( function.num_vars() ) <= _fanin_size )
-    {
+    if ( static_cast<uint32_t>( function.num_vars() ) <= _fanin_size ) {
       fn( ntk.create_node( std::vector<signal<Ntk>>( begin, end ), function ) );
       return;
     }

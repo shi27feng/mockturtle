@@ -53,8 +53,7 @@ inline void rtrim( std::string& s )
 {
   s.erase( std::find_if( s.rbegin(), s.rend(), []( int ch )
                          { return std::isspace( ch ) == 0; } )
-               .base(),
-           s.end() );
+           .base(), s.end() );
 }
 
 inline void trim( std::string& s )
