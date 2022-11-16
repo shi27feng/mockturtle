@@ -175,10 +175,13 @@ public:
   }
 
   template<typename LeavesIterator, typename Fn>
-  void operator()( xag_network& xag, kitty::dynamic_truth_table function, kitty::dynamic_truth_table const& dont_cares, LeavesIterator begin, LeavesIterator end, Fn&& fn )
-  {
-    if ( !kitty::is_const0( dont_cares ) )
-    {
+  void operator()( xag_network& xag, 
+                   kitty::dynamic_truth_table function, 
+                   kitty::dynamic_truth_table const& dont_cares, 
+                   LeavesIterator begin, 
+                   LeavesIterator end, 
+                   Fn&& fn ) {
+    if ( !kitty::is_const0( dont_cares ) ) {
       const auto cnt = kitty::count_ones( dont_cares );
       st.dont_cares += cnt;
 
