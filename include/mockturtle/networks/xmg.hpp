@@ -474,7 +474,7 @@ public:
 #pragma endregion
 
 #pragma region Has node
-  std::optional<node> has_maj( signal a, signal b, signal c )
+  std::optional<signal> has_maj( signal a, signal b, signal c )
   {
     /* order inputs */
     if ( a.index > b.index )
@@ -493,18 +493,20 @@ public:
     /* trivial cases */
     if ( a.index == b.index )
     {
-      return ( a.complement == b.complement ) ? get_node( a ) : get_node( c );
+      return ( a.complement == b.complement ) ? a : c;
     }
     else if ( b.index == c.index )
     {
-      return ( b.complement == c.complement ) ? get_node( b ) : get_node( a );
+      return ( b.complement == c.complement ) ? b : a;
     }
 
     /*  complemented edges minimization */
+    auto node_complement = false;
     if ( static_cast<unsigned>( a.complement ) + static_cast<unsigned>( b.complement ) +
              static_cast<unsigned>( c.complement ) >=
          2u )
     {
+      node_complement = true;
       a.complement = !a.complement;
       b.complement = !b.complement;
       c.complement = !c.complement;
@@ -520,13 +522,13 @@ public:
     if ( it != _storage->hash.end() )
     {
       assert( !is_dead( it->second ) );
-      return it->second;
+      return signal( it->second, node_complement );
     }
 
     return {};
   }
 
-  std::optional<node> has_xor3( signal a, signal b, signal c )
+  std::optional<signal> has_xor3( signal a, signal b, signal c )
   {
     /* order inputs */
     if ( a.index < b.index )
@@ -542,18 +544,19 @@ public:
       std::swap( a, b );
     }
 
+    /* propagate complement edges */
+    bool fcompl = ( a.complement != b.complement ) != c.complement;
+    a.complement = b.complement = c.complement = false;
+
     /* trivial cases */
     if ( a.index == b.index )
     {
-      return get_node( c );
+      return c ^ fcompl;
     }
     else if ( b.index == c.index )
     {
-      return get_node( a );
+      return a ^ fcompl;
     }
-
-    /* propagate complement edges */
-    a.complement = b.complement = c.complement = false;
 
     storage::element_type::node_type node;
     node.children[0] = a;
@@ -565,7 +568,7 @@ public:
     if ( it != _storage->hash.end() )
     {
       assert( !is_dead( it->second ) );
-      return it->second;
+      return signal( it->second, fcompl );
     }
 
     return {};
@@ -768,6 +771,32 @@ public:
     }
   }
 
+  void revive_node( node const& n )
+  {
+    if ( !is_dead( n ) )
+      return;
+
+    assert( n < _storage->nodes.size() );
+    auto& nobj = _storage->nodes[n];
+    nobj.data[0].h1 = UINT32_C( 0 ); /* fanout size 0, but not dead (like just created) */
+    _storage->hash[nobj] = n;
+
+    for ( auto const& fn : _events->on_add )
+    {
+      ( *fn )( n );
+    }
+
+    /* revive its children if dead, and increment their fanout_size */
+    for ( auto i = 0u; i < 3u; ++i )
+    {
+      if ( is_dead( nobj.children[i].index ) )
+      {
+        revive_node( nobj.children[i].index );
+      }
+      incr_fanout_size( nobj.children[i].index );
+    }
+  }
+
   inline bool is_dead( node const& n ) const
   {
     return ( _storage->nodes[n].data[0].h1 >> 31 ) & 1;
@@ -785,11 +814,20 @@ public:
       to_substitute.pop();
 
       signal _new = _curr;
-      while ( is_dead( get_node( _new ) ) )
+      /* find the real new node */
+      if ( is_dead( get_node( _new ) ) )
       {
-        const auto it = old_to_new.find( get_node( _new ) );
-        assert( it != old_to_new.end() );
-        _new = is_complemented( _new ) ? create_not( it->second ) : it->second;
+        auto it = old_to_new.find( get_node( _new ) );
+        while ( it != old_to_new.end() )
+        {
+          _new = is_complemented( _new ) ? create_not( it->second ) : it->second;
+          it = old_to_new.find( get_node( _new ) );
+        }
+      }
+      /* revive */
+      if ( is_dead( get_node( _new ) ) )
+      {
+        revive_node( get_node( _new ) );
       }
 
       for ( auto idx = 1u; idx < _storage->nodes.size(); ++idx )

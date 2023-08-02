@@ -29,6 +29,7 @@
 
   \author Heinz Riener
   \author Mathias Soeken
+  \author Marcel Walter
 */
 
 #pragma once
@@ -74,6 +75,13 @@ public: /* callbacks */
     }
     else
     {
+      if constexpr ( has_is_buf_v<Ntk> )
+      {
+        if ( ntk.is_buf( n ) )
+        {
+          return "box";
+        }
+      }
       return "ellipse";
     }
   }
@@ -97,6 +105,16 @@ public: /* callbacks */
 
   virtual std::string node_fillcolor( Ntk const& ntk, node<Ntk> const& n ) const
   {
+    if constexpr ( has_is_buf_v<Ntk> )
+    {
+      if ( ntk.is_buf( n ) )
+      {
+        if ( ntk.fanout_size( n ) > 1 )
+          return "lightcoral";
+        else
+          return "lightskyblue";
+      }
+    }
     return ( ntk.is_constant( n ) || ntk.is_ci( n ) ) ? "snow2" : "white";
   }
 
@@ -112,6 +130,11 @@ public: /* callbacks */
     (void)ntk;
     (void)n;
     (void)f;
+    if constexpr ( is_buffered_network_type_v<Ntk> )
+    {
+      if ( ntk.is_constant( ntk.get_node( f ) ) )
+        return false;
+    }
     return true;
   }
 
@@ -204,6 +227,22 @@ public:
       }
     }
 
+    if constexpr ( has_is_buf_v<Ntk> )
+    {
+      if ( ntk.is_buf( n ) && !ntk.is_ci( n ) )
+      {
+        return "BUF";
+      }
+    }
+
+    if constexpr ( has_is_crossing_v<Ntk> )
+    {
+      if ( ntk.is_crossing( n ) )
+      {
+        return "CROSS";
+      }
+    }
+
     return default_dot_drawer<Ntk>::node_label( ntk, n );
   }
 
@@ -280,6 +319,22 @@ public:
       if ( ntk.is_nary_xor( n ) )
       {
         return "lightskyblue";
+      }
+    }
+
+    if constexpr ( has_is_buf_v<Ntk> )
+    {
+      if ( ntk.is_buf( n ) && !ntk.is_ci( n ) )
+      {
+        return "palegoldenrod";
+      }
+    }
+
+    if constexpr ( has_is_crossing_v<Ntk> )
+    {
+      if ( ntk.is_crossing( n ) )
+      {
+        return "palegoldenrod";
       }
     }
 
